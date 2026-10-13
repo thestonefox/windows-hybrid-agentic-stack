@@ -1,0 +1,27 @@
+{
+  "installation": {
+    "directory": null
+  },
+  "agents": {
+    "cloud": {
+      "enabled": true,
+      "provider": "openai",
+      "model": "openai/gpt-6-luna"
+    },
+    "local": {
+      "enabled": true,
+      "provider": "ollama",
+      "model": "qwen3:8b"
+    }
+  },
+  "tts": {
+    "enabled": true,
+    "engine": "chatterbox-turbo",
+    "defaultVoice": "default",
+    "idleTimeoutMinutes": 10,
+    "autoStart": true,
+    "host": "127.0.0.1",
+    "port": 18765,
+    "device": "auto"
+  }
+}
