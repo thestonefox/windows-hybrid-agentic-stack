@@ -1,0 +1,24 @@
+{
+  "installation": {
+    "directory": null
+  },
+  "agents": {
+    "cloud": {
+      "enabled": true,
+      "provider": "openai",
+      "model": "openai/gpt-6-luna"
+    },
+    "local": {
+      "enabled": true,
+      "provider": "ollama",
+      "model": "qwen3:8b"
+    }
+  },
+  "tts": {
+    "enabled": true,
+    "defaultVoice": "default",
+    "idleTimeoutMinutes": 30,
+    "autoStart": true,
+    "device": "auto"
+  }
+}
