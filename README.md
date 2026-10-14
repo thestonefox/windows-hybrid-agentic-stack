@@ -29,24 +29,172 @@ The project is designed around four main components:
 
 The project targets Windows 10/11 with Windows PowerShell 5.1 or later.
 
-Depending on the components you choose, you may also need:
+Depending on the components you choose, you will need:
 
-| Component | Dependency |
+| Component | Dependencies |
 |---|---|
-| Cloud agents | OpenCode and an OpenAI account |
-| Local agents | OpenCode and Ollama |
-| Text-to-speech | Compatible Python installation and Chatterbox dependencies |
-| GPU-accelerated TTS | Compatible NVIDIA GPU, driver, and CUDA-enabled PyTorch |
+| Cloud agents | OpenCode and an OpenAI account with suitable model access |
+| Local agents | OpenCode, Ollama, and downloaded local models |
+| Text-to-speech | Compatible 64-bit Python installation and Chatterbox dependencies |
+| GPU-accelerated TTS | Compatible NVIDIA GPU, graphics driver, and CUDA-enabled PyTorch |
 
-Python compatibility and GPU requirements will be documented more precisely as the TTS installer is developed and tested.
+You do not need to install every component. For example, cloud-only agents do not require Python or Ollama.
 
-You do not need to install every component.
+The installer will manage the project's own dependencies, including Python virtual environments, PyTorch, Chatterbox packages, and service configuration.
+
+**External applications such as Python, Ollama, and OpenCode must be installed by the user before running the project installer.**
+
+## Installing prerequisites
+
+Install the external software required for your chosen features before running the project's prerequisite checker or installer.
+
+The recommended installation method is **Windows Package Manager (WinGet)**, which is normally included with current Windows 10 and Windows 11 installations through Microsoft's App Installer.
+
+We do not require npm, Scoop, or Chocolatey.
+
+### 1. Check WinGet
+
+Open **Windows PowerShell** and run:
+
+```powershell
+winget --version
+```
+
+If a version is displayed, WinGet is available.
+
+If the command is not recognised, follow Microsoft's official [WinGet installation instructions](https://learn.microsoft.com/en-us/windows/package-manager/winget/).
+
+> **Windows Sandbox:** WinGet is not normally included in a fresh Sandbox environment. See the Microsoft documentation above for Sandbox-specific setup instructions.
+
+### 2. Install Python (text-to-speech only)
+
+Python is required for Chatterbox TTS. It is not required for text-only cloud or local agents.
+
+Python 3.11 (64-bit) is our initial known-working reference for Chatterbox Turbo. Newer versions may be supported once their compatibility with Chatterbox and PyTorch has been verified.
+
+Install Python 3.11 using WinGet:
+
+```powershell
+winget install --id Python.Python.3.11 --exact --source winget
+```
+
+Alternatively, download Python from the [official Python website](https://www.python.org/downloads/windows/).
+
+After installation, **open a new PowerShell window** and verify:
+
+```powershell
+py --version
+```
+
+You can list Python installations using:
+
+```powershell
+py -0p
+```
+
+There is no need to install Chatterbox, PyTorch, or CUDA-enabled Python packages manually. The project installer will handle those dependencies in an isolated virtual environment.
+
+### 3. Install OpenCode (cloud or local agents)
+
+OpenCode provides the AI agent framework used by this project.
+
+Install the **OpenCode CLI** using WinGet:
+
+```powershell
+winget install --id SST.opencode --exact --source winget
+```
+
+This installs the command-line application, not the separate OpenCode desktop application.
+
+Open a new PowerShell window and verify:
+
+```powershell
+opencode --version
+```
+
+For more information, visit the [OpenCode website](https://opencode.ai/).
+
+OpenCode is required when using cloud or local AI agent features.
+
+### 4. Install Ollama (local agents only)
+
+Ollama allows language models to run locally on your computer.
+
+Install Ollama using WinGet:
+
+```powershell
+winget install --id Ollama.Ollama --exact --source winget
+```
+
+Alternatively, download it from the [official Ollama website](https://ollama.com/download/windows).
+
+Open a new PowerShell window and verify:
+
+```powershell
+ollama --version
+```
+
+To confirm the locally available models:
+
+```powershell
+ollama list
+```
+
+For example, you can download and run Qwen3 8B using:
+
+```powershell
+ollama run qwen3:8b
+```
+
+Qwen3 8B is an example model, not a mandatory dependency. Model selection will be configurable.
+
+You can skip Ollama if you only intend to use cloud agents.
+
+### 5. Configure OpenAI access (cloud agents only)
+
+Cloud agents use OpenCode to access remote AI models.
+
+You will need an OpenAI account and a supported authentication method with access to your chosen model.
+
+After installing OpenCode, launch it:
+
+```powershell
+opencode
+```
+
+Follow OpenCode's provider connection and authentication instructions.
+
+Model selection will eventually be managed through this project's configuration.
+
+Cloud AI may incur usage charges depending on your provider and authentication method.
+
+You can skip this step if you intend to use local AI only.
+
+### 6. NVIDIA drivers (GPU-accelerated TTS)
+
+For NVIDIA GPU acceleration, ensure that you have a compatible GPU and an up-to-date graphics driver.
+
+Download drivers from the [official NVIDIA website](https://www.nvidia.com/Download/index.aspx).
+
+Verify that Windows recognises your NVIDIA GPU:
+
+```powershell
+nvidia-smi
+```
+
+If the command succeeds, it should display the GPU model, driver version, and memory information.
+
+A separately installed CUDA Toolkit is not necessarily required. The project installer will manage the appropriate CUDA-enabled PyTorch packages where supported.
+
+NVIDIA acceleration is optional in the prerequisite checker. CPU-based TTS compatibility and performance are not yet verified.
 
 ## Prerequisite checks
 
-The project includes a read-only PowerShell checker to identify installed software and missing dependencies.
+Once the external software for your selected components is installed, use the project's read-only prerequisite checker.
 
-Check everything:
+It identifies missing applications, reports installed versions, and highlights potential compatibility issues without modifying your system.
+
+Check all components:
 
 ```powershell
 .\scripts\check-prerequisites.ps1 -Cloud -Local -Voice
@@ -54,15 +202,32 @@ Check everything:
 
 Check individual components:
 
+**Cloud agents:**
+
 ```powershell
 .\scripts\check-prerequisites.ps1 -Cloud
+```
+
+**Local agents:**
+
+```powershell
 .\scripts\check-prerequisites.ps1 -Local
+```
+
+**Text-to-speech:**
+
+```powershell
 .\scripts\check-prerequisites.ps1 -Voice
 ```
 
-The checker reports missing dependencies and compatibility warnings without modifying your system.
+The checker reports:
 
-A successful detection check does not guarantee that every software version or dependency combination is supported.
+- `PASS` — The prerequisite was detected successfully.
+- `WARN` — A potential issue needs reviewing.
+- `FAIL` — A required prerequisite is missing or a check failed.
+- `INFO` — Additional setup or verification is required.
+
+A successful prerequisite check does not guarantee that every software version or dependency combination is supported.
 
 ## Configuration
 
@@ -73,7 +238,7 @@ The project loads settings from:
 1. `config/defaults.json` — Built-in application defaults.
 2. `config.json` — Optional user-defined overrides.
 
-User configuration files can contain only the settings you want to change. Everything else inherits its default value.
+User configuration files only need to contain the settings you want to change. Everything else inherits its default value.
 
 ### Creating a configuration file
 
@@ -119,6 +284,8 @@ You can also generate a complete configuration from the built-in defaults:
 
 The configuration system supports partial overrides, validates values, and rejects unknown settings.
 
+User-specific `config.json` files are excluded from Git.
+
 **Note:** Configuration loading and validation are implemented. The installer, agent commands, and TTS service do not yet consume these settings.
 
 ## PowerShell execution policy
@@ -131,7 +298,7 @@ For scripts you trust, enable execution in the current PowerShell session:
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 ```
 
-This does not permanently change your execution policy.
+This applies only to the current session and does not permanently change your execution policy.
 
 Alternatively, run an individual script using:
 
@@ -145,15 +312,27 @@ See [Troubleshooting](docs/troubleshooting.md) for additional information.
 
 ## Installation
 
-Automated installation is not yet available.
+Automated project installation is not yet available.
 
-The planned installer will validate prerequisites, guide users through required software installation, configure selected components, and register PowerShell commands without overwriting existing user configuration.
+The intended installation workflow is:
+
+1. Install the required external prerequisites using the instructions above.
+2. Clone this repository.
+3. Run the prerequisite checker for your selected components.
+4. Run `install.ps1` once it becomes available.
+5. Select cloud agents, local agents, TTS, or a combination.
+6. Allow the installer to configure the selected components and their project-specific dependencies.
+7. Verify that your AI agents and optional voice output work correctly.
 
 Installation locations will be configurable rather than tied to a particular Windows user directory.
 
+The installer will be designed to preserve existing user settings and make PowerShell profile changes safely and reversibly.
+
 ## Development
 
-Development is being carried out incrementally, with changes tested on a configured Windows machine and in a clean Windows Sandbox environment.
+Development is carried out incrementally, with changes tested on an existing Windows installation and in a clean Windows Sandbox environment.
+
+Actual GPU-accelerated TTS inference must also be tested on compatible hardware, as Windows Sandbox does not provide the same CUDA access as the host.
 
 The project uses [Conventional Commits](https://www.conventionalcommits.org/) with scoped commit messages.
 
