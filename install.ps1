@@ -5,11 +5,11 @@
     Windows Hybrid Agentic Stack installer.
 
 .DESCRIPTION
-    Loads project configuration, selects components,
-    checks prerequisites and installs selected functionality.
+    Loads configuration, selects components, checks prerequisites
+    and installs cloud agents, local agents and Chatterbox Turbo.
 
+    Chatterbox automatically selects CPU or CUDA PyTorch.
     External prerequisites must already be installed.
-    Chatterbox installation is not yet implemented.
 
 .EXAMPLE
     .\install.ps1
@@ -21,7 +21,10 @@
     .\install.ps1 -Local
 
 .EXAMPLE
-    .\install.ps1 -Cloud -Local -InstallPath 'D:\AI\AgentStack'
+    .\install.ps1 -Voice
+
+.EXAMPLE
+    .\install.ps1 -Cloud -Local -Voice
 #>
 
 [CmdletBinding()]
@@ -40,6 +43,7 @@ $configScript = Join-Path $repoRoot 'scripts\config.ps1'
 $prerequisiteScript = Join-Path $repoRoot 'scripts\check-prerequisites.ps1'
 $agentSetupScript = Join-Path $repoRoot 'scripts\setup-agents.ps1'
 $commandInstallScript = Join-Path $repoRoot 'scripts\install-agent-commands.ps1'
+$ttsInstallScript = Join-Path $repoRoot 'tts\install-tts.ps1'
 
 function Read-YesNo {
     param(
@@ -69,29 +73,178 @@ function Read-YesNo {
     }
 }
 
+function Copy-StackFile {
+    param(
+        [string]$Source,
+        [string]$Destination
+    )
+
+    if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
+        return
+    }
+
+    $directory = Split-Path -Parent $Destination
+
+    if (-not (Test-Path -LiteralPath $directory)) {
+        New-Item -ItemType Directory -Path $directory -Force |
+            Out-Null
+    }
+
+    if (Test-Path -LiteralPath $Destination -PathType Leaf) {
+        $sourceHash = (
+            Get-FileHash -LiteralPath $Source -Algorithm SHA256
+        ).Hash
+
+        $destinationHash = (
+            Get-FileHash -LiteralPath $Destination -Algorithm SHA256
+        ).Hash
+
+        if ($sourceHash -eq $destinationHash) {
+            Write-Host "Unchanged: $Destination"
+            return
+        }
+
+        $backup = "$Destination.bak.$(
+            [guid]::NewGuid().ToString('N')
+        )"
+
+        Copy-Item -LiteralPath $Destination -Destination $backup
+        Write-Host "Backup: $backup"
+    }
+    elseif (Test-Path -LiteralPath $Destination) {
+        throw "Destination is not a file: $Destination"
+    }
+
+    Copy-Item -LiteralPath $Source -Destination $Destination -Force
+    Write-Host "Installed: $Destination"
+}
+
+function Install-TtsProfileLoader {
+    param(
+        [string]$Root
+    )
+
+    $ttsScript = Join-Path $Root 'tts\tts.ps1'
+
+    if (-not (Test-Path -LiteralPath $ttsScript -PathType Leaf)) {
+        throw "TTS command script not found: $ttsScript"
+    }
+
+    $profilePath = $PROFILE.CurrentUserCurrentHost
+    $profileDirectory = Split-Path -Parent $profilePath
+
+    if (-not (Test-Path -LiteralPath $profileDirectory)) {
+        New-Item `
+            -ItemType Directory `
+            -Path $profileDirectory `
+            -Force | Out-Null
+    }
+
+    $beginMarker = '# BEGIN WINDOWS HYBRID AGENTIC STACK TTS'
+    $endMarker = '# END WINDOWS HYBRID AGENTIC STACK TTS'
+
+    $escapedPath = $ttsScript.Replace("'", "''")
+
+    $loader = @(
+        $beginMarker
+        "`$stackTtsFile = '$escapedPath'"
+        'if (Test-Path -LiteralPath $stackTtsFile -PathType Leaf) {'
+        '    . $stackTtsFile'
+        '}'
+        'Remove-Variable stackTtsFile -ErrorAction SilentlyContinue'
+        $endMarker
+    ) -join [Environment]::NewLine
+
+    $existing = ''
+
+    if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
+        $existing = [System.IO.File]::ReadAllText($profilePath)
+    }
+
+    $start = $existing.IndexOf(
+        $beginMarker,
+        [System.StringComparison]::Ordinal
+    )
+
+    $end = $existing.IndexOf(
+        $endMarker,
+        [System.StringComparison]::Ordinal
+    )
+
+    if (($start -ge 0) -ne ($end -ge 0)) {
+        throw 'PowerShell profile contains an incomplete TTS loader.'
+    }
+
+    if ($start -ge 0) {
+        if ($end -lt $start) {
+            throw 'PowerShell profile TTS loader markers are invalid.'
+        }
+
+        $end += $endMarker.Length
+
+        $newContent = (
+            $existing.Substring(0, $start) +
+            $loader +
+            $existing.Substring($end)
+        )
+    }
+    else {
+        $separator = ''
+
+        if (
+            $existing.Length -gt 0 -and
+            -not $existing.EndsWith("`n")
+        ) {
+            $separator = [Environment]::NewLine
+        }
+
+        $newContent = (
+            $existing +
+            $separator +
+            $loader +
+            [Environment]::NewLine
+        )
+    }
+
+    if ($newContent -ceq $existing) {
+        Write-Host 'PowerShell TTS profile loader is unchanged.'
+        return
+    }
+
+    if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
+        $backup = "$profilePath.bak.$(
+            [guid]::NewGuid().ToString('N')
+        )"
+
+        Copy-Item `
+            -LiteralPath $profilePath `
+            -Destination $backup `
+            -ErrorAction Stop
+
+        Write-Host "Profile backup: $backup"
+    }
+
+    [System.IO.File]::WriteAllText(
+        $profilePath,
+        $newContent,
+        (New-Object System.Text.UTF8Encoding($false))
+    )
+
+    Write-Host "TTS commands registered in: $profilePath"
+}
+
 try {
     Write-Host ''
     Write-Host 'Windows Hybrid Agentic Stack'
     Write-Host '============================'
     Write-Host ''
 
-    $requiredScripts = @(
-        $configScript,
-        $prerequisiteScript
-    )
-
-    if ($Cloud -or $Local -or -not ($Cloud -or $Local -or $Voice)) {
-        $requiredScripts += $agentSetupScript
-        $requiredScripts += $commandInstallScript
-    }
-
-    foreach ($file in $requiredScripts) {
+    foreach ($file in @($configScript, $prerequisiteScript)) {
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
             throw "Required project script missing: $file"
         }
     }
 
-    # Validate effective configuration.
     & $configScript -Validate
 
     if ($LASTEXITCODE -ne 0) {
@@ -110,7 +263,6 @@ try {
         throw 'Configuration could not be parsed.'
     }
 
-    # Explicit switches select only the specified components.
     $explicitSelection = $Cloud -or $Local -or $Voice
 
     if (-not $explicitSelection) {
@@ -143,9 +295,18 @@ try {
         }
     }
 
-    # Resolve installation directory.
+    if ($Voice) {
+        if (-not (Test-Path -LiteralPath $ttsInstallScript -PathType Leaf)) {
+            throw "Required TTS installer missing: $ttsInstallScript"
+        }
+
+        if ($config.tts.engine -ne 'chatterbox-turbo') {
+            throw "Unsupported TTS engine: $($config.tts.engine)"
+        }
+    }
+
     if ([string]::IsNullOrWhiteSpace($InstallPath)) {
-        $InstallPath = $config.installation.directory
+        $InstallPath = [string]$config.installation.directory
     }
 
     if ([string]::IsNullOrWhiteSpace($InstallPath)) {
@@ -156,9 +317,12 @@ try {
         $InstallPath
     )
 
-    $InstallPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
-        $InstallPath
-    )
+    if ($InstallPath -match '^\$HOME(?=[\\/]|$)') {
+        $InstallPath = $HOME + $InstallPath.Substring(5)
+    }
+
+    $InstallPath = $ExecutionContext.SessionState.Path.
+        GetUnresolvedProviderPathFromPSPath($InstallPath)
 
     Write-Host ''
     Write-Host 'Installation plan'
@@ -178,6 +342,7 @@ try {
 
     if ($Voice) {
         Write-Host "TTS engine:   $($config.tts.engine)"
+        Write-Host "TTS device:   $($config.tts.device)"
     }
 
     Write-Host ''
@@ -244,13 +409,32 @@ try {
 
     if ($Voice) {
         Write-Host ''
-        Write-Host 'Chatterbox installation is not implemented yet.' `
-            -ForegroundColor Yellow
+        Write-Host 'Installing Chatterbox Turbo...'
+        Write-Host ''
+
+        & $ttsInstallScript `
+            -InstallPath $InstallPath `
+            -Device ([string]$config.tts.device)
+
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Chatterbox Turbo installation failed.'
+        }
+
+        # Keep the installed runtime configuration alongside TTS.
+        # Existing files are preserved with a backup on changes.
+        Copy-StackFile `
+            -Source (Join-Path $repoRoot 'config\defaults.json') `
+            -Destination (Join-Path $InstallPath 'config\defaults.json')
+
+        Copy-StackFile `
+            -Source (Join-Path $repoRoot 'config\config.json') `
+            -Destination (Join-Path $InstallPath 'config\config.json')
+
+        Install-TtsProfileLoader -Root $InstallPath
     }
 
     Write-Host ''
-    Write-Host 'Installation stage completed.' `
-        -ForegroundColor Green
+    Write-Host 'Installation completed.' -ForegroundColor Green
 
     if ($Cloud -or $Local) {
         $openCodeConfig = Join-Path $InstallPath 'opencode.json'
@@ -267,7 +451,15 @@ try {
 
     if ($Voice) {
         Write-Host ''
-        Write-Host 'Voice commands will be added with Chatterbox integration.'
+        Write-Host 'Open a new Windows PowerShell window to use:'
+        Write-Host '  tts-start'
+        Write-Host '  tts-stop'
+        Write-Host '  tts-status'
+        Write-Host '  tts-say'
+        Write-Host '  tts-voice-list'
+        Write-Host '  tts-voice-add'
+        Write-Host '  tts-voice-remove'
+        Write-Host '  tts-voice-test'
     }
 
     exit 0

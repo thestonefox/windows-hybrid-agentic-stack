@@ -4,6 +4,19 @@
 .SYNOPSIS
     Read-only prerequisite checker for Windows Hybrid Agentic Stack.
 
+.DESCRIPTION
+    Checks prerequisites for cloud agents, local agents and
+    Chatterbox Turbo TTS.
+
+    For TTS, requires:
+      - 64-bit Python 3.11
+      - Microsoft Visual C++ Redistributable (x64)
+
+    An NVIDIA GPU is optional. Without one, the TTS installer
+    selects CPU-only PyTorch.
+
+    This script does not install or change anything.
+
 .EXAMPLE
     .\scripts\check-prerequisites.ps1 -Cloud -Local -Voice
 
@@ -81,11 +94,10 @@ function Test-VersionCommand {
     }
 }
 
-
 function Get-PythonInstallations {
     $candidates = [System.Collections.Generic.List[string]]::new()
 
-    # Discover Python installations registered with the Windows launcher.
+    # Discover installations registered with the Windows launcher.
     $launcher = Get-Executable 'py.exe'
 
     if ($launcher) {
@@ -112,17 +124,19 @@ function Get-PythonInstallations {
     }
 
     # Discover standard per-user Python installations.
-    $pythonRoot = Join-Path $env:LOCALAPPDATA 'Programs\Python'
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        $pythonRoot = Join-Path $env:LOCALAPPDATA 'Programs\Python'
 
-    if (Test-Path $pythonRoot) {
-        Get-ChildItem $pythonRoot -Directory -ErrorAction SilentlyContinue |
-            ForEach-Object {
-                $path = Join-Path $_.FullName 'python.exe'
+        if (Test-Path -LiteralPath $pythonRoot -PathType Container) {
+            Get-ChildItem $pythonRoot -Directory -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    $path = Join-Path $_.FullName 'python.exe'
 
-                if (Test-Path $path) {
-                    $candidates.Add($path)
+                    if (Test-Path -LiteralPath $path -PathType Leaf) {
+                        $candidates.Add($path)
+                    }
                 }
-            }
+        }
     }
 
     $installations = @()
@@ -133,6 +147,8 @@ function Get-PythonInstallations {
         }
 
         try {
+            # chr() avoids native-command argument quoting issues
+            # in Windows PowerShell 5.1.
             $code = 'import sys,struct; print(str(sys.version_info.major)+chr(46)+str(sys.version_info.minor)+chr(46)+str(sys.version_info.micro)+chr(124)+str(struct.calcsize(chr(80))*8))'
 
             $output = & $path -c $code 2>$null
@@ -157,6 +173,73 @@ function Get-PythonInstallations {
     }
 
     return @($installations | Sort-Object Version -Descending)
+}
+
+function Get-VcRedistributable {
+    # Microsoft's supported Visual C++ 2015-2022/2026
+    # redistributables register installation information here.
+    #
+    # Check both registry views so detection works if the
+    # prerequisite checker is launched from 32-bit PowerShell.
+    $subkey = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64'
+
+    foreach ($view in @(
+        [Microsoft.Win32.RegistryView]::Registry64,
+        [Microsoft.Win32.RegistryView]::Registry32
+    )) {
+        $base = $null
+        $key = $null
+
+        try {
+            $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+                [Microsoft.Win32.RegistryHive]::LocalMachine,
+                $view
+            )
+
+            $key = $base.OpenSubKey($subkey)
+
+            if ($null -eq $key) {
+                continue
+            }
+
+            $installed = $key.GetValue('Installed', 0)
+
+            if ([int]$installed -ne 1) {
+                continue
+            }
+
+            $version = [string]$key.GetValue('Version', '')
+
+            if ([string]::IsNullOrWhiteSpace($version)) {
+                $major = $key.GetValue('Major', 0)
+                $minor = $key.GetValue('Minor', 0)
+                $build = $key.GetValue('Bld', 0)
+                $revision = $key.GetValue('Rbld', 0)
+
+                $version = "$major.$minor.$build.$revision"
+            }
+
+            return [pscustomobject]@{
+                Version = $version
+                View    = $view.ToString()
+            }
+        }
+        catch {
+            # Missing or inaccessible registry entries are
+            # treated as not detected, never as installed.
+        }
+        finally {
+            if ($null -ne $key) {
+                $key.Close()
+            }
+
+            if ($null -ne $base) {
+                $base.Close()
+            }
+        }
+    }
+
+    return $null
 }
 
 Write-Host ''
@@ -184,7 +267,15 @@ catch {
 # PowerShell
 $psVersion = $PSVersionTable.PSVersion
 
-Add-Check 'PowerShell' 'PASS' "$psVersion" $true
+if (
+    $psVersion.Major -ge 5 -and
+    -not ($psVersion.Major -eq 5 -and $psVersion.Minor -lt 1)
+) {
+    Add-Check 'PowerShell' 'PASS' "$psVersion" $true
+}
+else {
+    Add-Check 'PowerShell' 'FAIL' "PowerShell $psVersion is below the required version 5.1." $true
+}
 
 # Execution policy
 try {
@@ -246,39 +337,70 @@ if ($Local) {
     }
 }
 
-# Python and NVIDIA are relevant only to voice installation.
+# Python, Visual C++ and NVIDIA are relevant only to TTS.
 if ($Voice) {
     $pythons = @(Get-PythonInstallations)
 
+    # The TTS installer explicitly uses "py -3.11".
     $compatible = @(
         $pythons | Where-Object {
             $_.Bits -eq 64 -and
             $_.Version.Major -eq 3 -and
-            $_.Version.Minor -ge 10 -and
-            $_.Version.Minor -le 13
+            $_.Version.Minor -eq 11
         }
     )
 
-    $newer = @(
-        $pythons | Where-Object {
-            $_.Bits -eq 64 -and
-            $_.Version.Major -eq 3 -and
-            $_.Version.Minor -gt 13
-        }
-    )
+    $launcher = Get-Executable 'py.exe'
 
-    if ($compatible.Count -gt 0) {
+    if ($compatible.Count -gt 0 -and $launcher) {
         $python = $compatible | Select-Object -First 1
-        Add-Check 'Python' 'PASS' "Python $($python.Version), 64-bit - $($python.Path)" $true
+
+        # Also verify that the precise interpreter requested by the
+        # TTS installer is available through the Python launcher.
+        $launcherWorks = $false
+
+        try {
+            & $launcher.Source -3.11 -c "import struct,sys; sys.exit(0 if sys.version_info[:2] == (3,11) and struct.calcsize('P')*8 == 64 else 1)" 2>$null
+
+            $launcherWorks = ($LASTEXITCODE -eq 0)
+        }
+        catch {
+            $launcherWorks = $false
+        }
+
+        if ($launcherWorks) {
+            Add-Check 'Python 3.11' 'PASS' "Python $($python.Version), 64-bit - $($python.Path)" $true
+        }
+        else {
+            Add-Check 'Python 3.11' 'FAIL' '64-bit Python 3.11 was found, but the Python launcher could not run it using py -3.11.' $true
+        }
     }
-    elseif ($newer.Count -gt 0) {
-        $python = $newer | Select-Object -First 1
-        Add-Check 'Python' 'WARN' "Python $($python.Version) found but full Chatterbox/CUDA compatibility is unverified." $true
+    elseif ($compatible.Count -gt 0) {
+        Add-Check 'Python 3.11' 'FAIL' '64-bit Python 3.11 found, but py.exe is missing. Install the Windows Python launcher.' $true
     }
     else {
-        Add-Check 'Python' 'FAIL' 'No suitable 64-bit Python 3 installation detected.' $true
+        Add-Check 'Python 3.11' 'FAIL' '64-bit Python 3.11 not found. Install with: winget install --id Python.Python.3.11 --exact --source winget' $true
     }
 
+    # Microsoft Visual C++ runtime is needed for PyTorch DLLs.
+    $vcRuntime = Get-VcRedistributable
+
+    if ($null -ne $vcRuntime) {
+        Add-Check `
+            'Visual C++ x64' `
+            'PASS' `
+            "Microsoft Visual C++ Redistributable x64 detected ($($vcRuntime.Version))." `
+            $true
+    }
+    else {
+        Add-Check `
+            'Visual C++ x64' `
+            'FAIL' `
+            'Microsoft Visual C++ Redistributable x64 not detected. Install with: winget install --id Microsoft.VCRedist.2015+.x64 --exact --source winget' `
+            $true
+    }
+
+    # An NVIDIA GPU is optional; CPU TTS is supported.
     $nvidia = Get-Executable 'nvidia-smi.exe'
 
     if ($nvidia) {
@@ -289,7 +411,7 @@ if ($Voice) {
                 Add-Check 'NVIDIA GPU' 'PASS' (($gpu | Out-String).Trim()) $false
             }
             else {
-                Add-Check 'NVIDIA GPU' 'WARN' 'NVIDIA GPU query failed.' $false
+                Add-Check 'NVIDIA GPU' 'WARN' 'NVIDIA GPU query failed; the TTS installer may select CPU mode.' $false
             }
         }
         catch {
@@ -297,10 +419,10 @@ if ($Voice) {
         }
     }
     else {
-        Add-Check 'NVIDIA GPU' 'WARN' 'nvidia-smi not found. GPU acceleration cannot be verified.' $false
+        Add-Check 'NVIDIA GPU' 'INFO' 'No NVIDIA GPU detected. The TTS installer will select CPU-only PyTorch by default.' $false
     }
 
-    Add-Check 'CUDA/PyTorch' 'INFO' 'CUDA-enabled PyTorch compatibility will be verified during TTS installation.' $false
+    Add-Check 'CUDA/PyTorch' 'INFO' 'The TTS installer installs CPU or CUDA 12.6 PyTorch and verifies its dependencies.' $false
 }
 
 $results | Format-Table -AutoSize -Wrap

@@ -16,7 +16,7 @@
       -m, --model    Override the configured model
       -l, --log      Display full OpenCode output
       -h, --help     Show usage
-      -v, --voice    Reserved for Chatterbox integration
+      -v, --voice    Speak the final answer using Chatterbox
 
     This file is dot-sourced into a PowerShell session.
 #>
@@ -52,12 +52,20 @@ function Show-AgentHelp {
     Write-Host '  -m, --model MODEL  Override the configured model'
     Write-Host '  -l, --log          Show full OpenCode output'
     Write-Host '  -h, --help         Show this help'
-    Write-Host '  -v, --voice        Voice support (not installed yet)'
+    Write-Host '  -v, --voice        Speak the final answer'
+    Write-Host '                      Optionally specify a voice name'
     Write-Host ''
     Write-Host 'Examples:'
     Write-Host "  $CommandName `"Explain this code`""
     Write-Host "  $CommandName -m $exampleModel `"Explain this code`""
     Write-Host "  $CommandName -l `"Explain this code`""
+    Write-Host "  $CommandName -v `"Explain this code`""
+    Write-Host "  $CommandName -v default `"Explain this code`""
+    Write-Host "  $CommandName --voice default `"Explain this code`""
+    Write-Host ''
+    Write-Host 'Voice uses the default voice unless a name is supplied.'
+    Write-Host 'For a custom voice, put its name immediately before'
+    Write-Host 'the quoted prompt.'
     Write-Host ''
 }
 
@@ -86,6 +94,8 @@ function Invoke-AgentStackTask {
     }
 
     $verboseOutput = $false
+    $voiceEnabled = $false
+    $voiceName = $null
     $modelOverride = $null
     $promptParts = @()
 
@@ -112,8 +122,10 @@ function Invoke-AgentStackTask {
                 $i++
                 $modelOverride = [string]$Arguments[$i]
 
-                if ([string]::IsNullOrWhiteSpace($modelOverride) -or
-                    $modelOverride.StartsWith('-')) {
+                if (
+                    [string]::IsNullOrWhiteSpace($modelOverride) -or
+                    $modelOverride.StartsWith('-')
+                ) {
                     Write-Error 'Invalid model name after -m'
                     return
                 }
@@ -122,11 +134,33 @@ function Invoke-AgentStackTask {
             }
 
             { $_ -in @('-v', '--voice') } {
-                Write-Error (
-                    'Voice support is not installed yet. ' +
-                    'Chatterbox integration will be added later.'
-                )
-                return
+                $voiceEnabled = $true
+
+                # A voice name is optional.
+                #
+                # -v "prompt"
+                #     Uses the configured default voice.
+                #
+                # -v default "prompt"
+                #     Uses the explicitly selected voice.
+                #
+                # Only consume the next argument as a voice name
+                # when a separate prompt argument follows it.
+                if ($i + 2 -lt $Arguments.Count) {
+                    $candidate = [string]$Arguments[$i + 1]
+                    $following = [string]$Arguments[$i + 2]
+
+                    if (
+                        $candidate -cmatch `
+                            '^[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}$' -and
+                        -not $following.StartsWith('-')
+                    ) {
+                        $voiceName = $candidate
+                        $i++
+                    }
+                }
+
+                break
             }
 
             default {
@@ -201,6 +235,63 @@ function Invoke-AgentStackTask {
         return
     }
 
+    if ($voiceEnabled) {
+        # When voice support is already loaded, use it directly.
+        # This also allows a mock tts-say function during tests.
+        if ($null -eq (
+            Get-Command tts-say -ErrorAction SilentlyContinue
+        )) {
+            $ttsScript = Join-Path `
+                $script:AgentStackInstallPath 'tts\tts.ps1'
+
+            if (-not (
+                Test-Path -LiteralPath $ttsScript -PathType Leaf
+            )) {
+                # During development, the wrapper may be present
+                # in the repository before the installed runtime
+                # has been updated.
+                $ttsScript = Join-Path `
+                    $script:AgentStackRepository 'tts\tts.ps1'
+            }
+
+            if (-not (
+                Test-Path -LiteralPath $ttsScript -PathType Leaf
+            )) {
+                Write-Error (
+                    'Chatterbox voice commands were not found. ' +
+                    'Install the TTS component first.'
+                )
+                return
+            }
+
+            try {
+                . $ttsScript
+            }
+            catch {
+                Write-Error (
+                    'Could not load Chatterbox commands: ' +
+                    $_.Exception.Message
+                )
+                return
+            }
+        }
+
+        if ($null -eq (
+            Get-Command tts-say -ErrorAction SilentlyContinue
+        )) {
+            Write-Error 'Chatterbox tts-say command is unavailable.'
+            return
+        }
+
+        if ([string]::IsNullOrWhiteSpace($voiceName)) {
+            $voiceName = [string]$config.tts.defaultVoice
+        }
+
+        if ([string]::IsNullOrWhiteSpace($voiceName)) {
+            $voiceName = 'default'
+        }
+    }
+
     $prompt = $promptParts -join ' '
 
     $previousConfig = $env:OPENCODE_CONFIG
@@ -218,7 +309,9 @@ function Invoke-AgentStackTask {
         [Console]::OutputEncoding = $utf8
         $OutputEncoding = $utf8
 
-        if ($verboseOutput) {
+        # Preserve the existing full-output behaviour when
+        # voice support is not requested.
+        if ($verboseOutput -and -not $voiceEnabled) {
             & opencode run `
                 --agent $agentName `
                 --model $model `
@@ -227,9 +320,10 @@ function Invoke-AgentStackTask {
             return
         }
 
-        # Show only the final answer from OpenCode JSON events.
+        # JSON events provide the final response text for TTS.
         $lastText = $null
         $errorsFound = @()
+        $exitCode = 0
 
         & opencode run `
             --agent $agentName `
@@ -239,13 +333,21 @@ function Invoke-AgentStackTask {
             ForEach-Object {
                 $line = [string]$_
 
+                if ($verboseOutput) {
+                    # With -v -l, display the complete JSON event
+                    # stream and still extract text for speech.
+                    Write-Output $line
+                }
+
                 try {
                     $eventData = $line |
                         ConvertFrom-Json -ErrorAction Stop
 
-                    if ($eventData.type -eq 'text' -and
-                        $eventData.part.text) {
-                        $lastText = $eventData.part.text
+                    if (
+                        $eventData.type -eq 'text' -and
+                        $eventData.part.text
+                    ) {
+                        $lastText = [string]$eventData.part.text
                     }
 
                     if ($eventData.type -eq 'error') {
@@ -262,7 +364,9 @@ function Invoke-AgentStackTask {
                 }
             }
 
-        if ($lastText) {
+        $exitCode = $LASTEXITCODE
+
+        if ($lastText -and -not $verboseOutput) {
             Write-Output $lastText
         }
 
@@ -272,11 +376,34 @@ function Invoke-AgentStackTask {
             }
         }
 
-        if (-not $lastText -and $errorsFound.Count -eq 0) {
-            Write-Warning (
-                'No answer received. ' +
-                'Retry with -l to see the full output.'
-            )
+        if ($exitCode -ne 0) {
+            Write-Warning "OpenCode exited with code $exitCode."
+            return
+        }
+
+        if (-not $lastText) {
+            if ($errorsFound.Count -eq 0) {
+                Write-Warning (
+                    'No answer received. ' +
+                    'Retry with -l to see the full output.'
+                )
+            }
+
+            return
+        }
+
+        if ($voiceEnabled) {
+            # Speak only the final answer, not tool logs or
+            # intermediate OpenCode events.
+            try {
+                tts-say -Text $lastText -Voice $voiceName
+            }
+            catch {
+                Write-Warning (
+                    'The agent answered, but speech failed: ' +
+                    $_.Exception.Message
+                )
+            }
         }
     }
     finally {

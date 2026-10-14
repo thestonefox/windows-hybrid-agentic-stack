@@ -1,110 +1,132 @@
 # Windows Hybrid Agentic Stack
 
-A configurable Windows AI agent toolkit combining local language models, cloud AI models, agent orchestration, and GPU-accelerated text-to-speech.
+A configurable Windows AI agent toolkit combining local language models, cloud AI models, agent orchestration, and local text-to-speech.
 
-The goal is to provide a straightforward way to set up a hybrid AI environment on Windows, with PowerShell commands for interacting with local and cloud models and optional spoken responses.
+The project provides PowerShell commands for interacting with cloud and local AI agents, running agent-assisted tasks, and optionally speaking responses using Chatterbox Turbo.
 
-> **Development status:** This project is under active development. Prerequisite detection, configuration management, OpenCode/Ollama agent setup, and four PowerShell agent commands are implemented. Chatterbox installation, voice output, and uninstallation are still being developed.
+> **Development status:** This project is under active development. Cloud and local agent setup, PowerShell commands, Chatterbox dependency installation, and TTS command registration are implemented. Voice integration has been tested with a mock speech function. Actual speech synthesis and GPU inference still require end-to-end verification.
 
 ## Features
 
-The project is designed around four main components:
+The stack combines four components:
 
-- **Local AI — [Ollama](https://ollama.com/)**: Run language models locally on your machine.
-- **Cloud AI — [OpenAI](https://openai.com/)**: Access cloud-hosted AI models.
-- **Agent orchestration — [OpenCode](https://opencode.ai/)**: Manage AI interactions, coding tasks, and tool execution.
-- **Text-to-speech — [Chatterbox](https://github.com/resemble-ai/chatterbox)**: Generate speech locally, with support for custom voice profiles.
+- **Local AI — [Ollama](https://ollama.com/):** Run language models locally.
+- **Cloud AI — [OpenAI](https://openai.com/):** Access cloud-hosted AI models.
+- **Agent orchestration — [OpenCode](https://opencode.ai/):** Run AI agents with separate read-only and write-capable permissions.
+- **Text-to-speech — [Chatterbox](https://github.com/resemble-ai/chatterbox):** Generate speech locally, with support for custom voice profiles.
 
-### Planned capabilities
+Components can be installed independently or in combination.
 
-- Independent setup of cloud and local agents; optional TTS installation is planned.
-- Configurable agent model selection; TTS configuration is implemented but not yet applied to a service.
-- PowerShell commands for cloud and local AI agents are implemented; spoken responses are planned.
-- Automatic startup and idle shutdown of the TTS service.
-- Runtime configuration changes where supported.
-- Installation and uninstallation scripts.
-- Local GPU acceleration for speech generation.
+The project supports:
+
+- Configurable cloud and local agent models.
+- Four PowerShell agent commands.
+- Read-only and write-capable agent modes.
+- Optional spoken agent responses.
+- Custom Chatterbox voice profiles.
+- Automatic CPU or NVIDIA CUDA selection for TTS.
+- On-demand TTS service startup and configured idle shutdown.
+- Stack-specific OpenCode configuration.
+- Isolated Python environments for Chatterbox.
+- Repeat installations that preserve existing configuration and profile content.
 
 ## Requirements
 
-The project targets Windows 10/11 with Windows PowerShell 5.1 or later.
+The project targets **Windows 10/11 and Windows PowerShell 5.1**.
 
-Depending on the components you choose, you will need:
-
-| Component | Dependencies |
+| Component | Requirements |
 |---|---|
-| Cloud agents | OpenCode and an OpenAI account with suitable model access |
-| Local agents | OpenCode, Ollama, and downloaded local models |
-| Text-to-speech | Compatible 64-bit Python installation and Chatterbox dependencies |
-| GPU-accelerated TTS | Compatible NVIDIA GPU, graphics driver, and CUDA-enabled PyTorch |
+| Cloud agents | OpenCode and suitable OpenAI authentication |
+| Local agents | OpenCode, Ollama, and a downloaded local model |
+| Text-to-speech | Python 3.11 (64-bit) and Microsoft Visual C++ Redistributable (x64) |
+| NVIDIA-accelerated TTS | Compatible NVIDIA GPU and driver |
 
-You do not need to install every component. For example, cloud-only agents do not require Python or Ollama.
+You only need the prerequisites for the components you intend to install.
 
-A future installer stage will manage TTS dependencies, including a Python virtual environment, PyTorch, Chatterbox packages, and service configuration. The current installer configures OpenCode and can download Ollama models.
+Cloud-only agents do not require Python or Ollama. Voice-only installation does not require OpenCode or Ollama.
 
-**External applications such as Python, Ollama, and OpenCode must be installed by the user before running the project installer.**
+The project installer manages the Chatterbox Python virtual environment, PyTorch, and Python package dependencies. External applications such as Python, OpenCode, and Ollama must be installed separately.
 
 ## Installing prerequisites
 
-Install the external software required for your chosen features before running the project's prerequisite checker or installer.
+We recommend **Windows Package Manager (WinGet)** for external application installation.
 
-The recommended installation method is **Windows Package Manager (WinGet)**, which is normally included with current Windows 10 and Windows 11 installations through Microsoft's App Installer.
-
-We do not require npm, Scoop, or Chocolatey.
+The project does not require users to install npm, Scoop, Chocolatey, Visual Studio, or the CUDA Toolkit for its standard setup.
 
 ### 1. Check WinGet
 
-Open **Windows PowerShell** and run:
+Open Windows PowerShell and run:
 
 ```powershell
 winget --version
 ```
 
-If a version is displayed, WinGet is available.
+If WinGet is unavailable, follow Microsoft's [WinGet installation instructions](https://learn.microsoft.com/en-us/windows/package-manager/winget/).
 
-If the command is not recognised, follow Microsoft's official [WinGet installation instructions](https://learn.microsoft.com/en-us/windows/package-manager/winget/).
+Windows Sandbox may require additional WinGet setup.
 
-> **Windows Sandbox:** WinGet is not normally included in a fresh Sandbox environment. See the Microsoft documentation above for Sandbox-specific setup instructions.
+### 2. Install Python 3.11 (TTS only)
 
-### 2. Install Python (text-to-speech only)
+Chatterbox requires a compatible Python installation. The project's tested reference is **64-bit Python 3.11**.
 
-Python is required for Chatterbox TTS. It is not required for text-only cloud or local agents.
-
-Python 3.11 (64-bit) is our initial known-working reference for Chatterbox Turbo. Newer versions may be supported once their compatibility with Chatterbox and PyTorch has been verified.
-
-Install Python 3.11 using WinGet:
+Install it using:
 
 ```powershell
 winget install --id Python.Python.3.11 --exact --source winget
 ```
 
-Alternatively, download Python from the [official Python website](https://www.python.org/downloads/windows/).
-
-After installation, **open a new PowerShell window** and verify:
+Open a new PowerShell window and verify:
 
 ```powershell
-py --version
+py -3.11 --version
 ```
 
-You can list Python installations using:
+You can also list installed Python versions:
 
 ```powershell
 py -0p
 ```
 
-Chatterbox and PyTorch installation is not yet implemented in this project. Their dependencies will be managed in an isolated virtual environment in a later stage.
+The TTS installer uses Python 3.11 to create a separate virtual environment inside the selected stack installation directory.
 
-### 3. Install OpenCode (cloud or local agents)
+It does not install Chatterbox packages into your global Python installation.
 
-OpenCode provides the AI agent framework used by this project.
+### 3. Install Microsoft Visual C++ Redistributable (TTS only)
 
-Install the **OpenCode CLI** using WinGet:
+**Microsoft Visual C++ Redistributable 2015–2022 (x64) is required for Chatterbox Turbo on Windows.**
+
+This applies to both CPU-only and CUDA-enabled installations.
+
+PyTorch uses native Windows DLLs that depend on the Microsoft Visual C++ runtime.
+
+Install the redistributable using:
+
+```powershell
+winget install --id Microsoft.VCRedist.2015+.x64 --exact --source winget
+```
+
+If the runtime is already installed, WinGet may report that no applicable update is available.
+
+Alternatively, download the supported x64 redistributable from [Microsoft](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist).
+
+Without this prerequisite, importing PyTorch may fail with an error such as:
+
+```text
+OSError: [WinError 126] The specified module could not be found.
+Error loading torch\lib\c10.dll or one of its dependencies.
+```
+
+Install the redistributable, reopen PowerShell if necessary, and retry the Chatterbox installer.
+
+**The full Visual Studio IDE, C++ build tools, and a separate CUDA Toolkit are not required for the precompiled PyTorch packages used by this installer.**
+
+### 4. Install OpenCode (cloud or local agents)
+
+Install the OpenCode CLI:
 
 ```powershell
 winget install --id SST.opencode --exact --source winget
 ```
-
-This installs the command-line application, not the separate OpenCode desktop application.
 
 Open a new PowerShell window and verify:
 
@@ -112,21 +134,15 @@ Open a new PowerShell window and verify:
 opencode --version
 ```
 
-For more information, visit the [OpenCode website](https://opencode.ai/).
+See the [OpenCode website](https://opencode.ai/) for documentation.
 
-OpenCode is required when using cloud or local AI agent features.
+### 5. Install Ollama (local agents only)
 
-### 4. Install Ollama (local agents only)
-
-Ollama allows language models to run locally on your computer.
-
-Install Ollama using WinGet:
+Install Ollama:
 
 ```powershell
 winget install --id Ollama.Ollama --exact --source winget
 ```
-
-Alternatively, download it from the [official Ollama website](https://ollama.com/download/windows).
 
 Open a new PowerShell window and verify:
 
@@ -134,65 +150,69 @@ Open a new PowerShell window and verify:
 ollama --version
 ```
 
-To confirm the locally available models:
+List downloaded models:
 
 ```powershell
 ollama list
 ```
 
-For example, you can download and run Qwen3 8B using:
+The built-in local model default is `qwen3:8b`. The installer checks whether the configured model is available and offers to download it if necessary.
+
+To download the default model manually:
 
 ```powershell
-ollama run qwen3:8b
+ollama pull qwen3:8b
 ```
 
-Qwen3 8B is the built-in default model, not a mandatory choice. You can select a different model in `config/config.json`. The installer checks for the selected model and offers to download it if missing.
+You can configure another model in `config/config.json`.
 
-You can skip Ollama if you only intend to use cloud agents.
+### 6. Configure OpenAI authentication (cloud agents only)
 
-### 5. Configure OpenAI access (cloud agents only)
+Cloud agents use OpenCode to access OpenAI models.
 
-Cloud agents use OpenCode to access remote AI models.
-
-You will need an OpenAI account and a supported authentication method with access to your chosen model.
-
-After installing OpenCode, launch it:
+Launch OpenCode:
 
 ```powershell
 opencode
 ```
 
-Follow OpenCode's provider connection and authentication instructions.
+Follow its provider authentication instructions.
 
-Model selection is managed through this project's configuration. The installer creates a stack-specific OpenCode configuration; authentication and actual cloud model access must still be set up and verified separately.
+You need access to the model selected in the stack configuration.
 
-Cloud AI may incur usage charges depending on your provider and authentication method.
+Model availability and billing depend on your OpenAI account and authentication method.
 
-You can skip this step if you intend to use local AI only.
+The installer configures the model selection but does not authenticate your account or guarantee access to a particular cloud model.
 
-### 6. NVIDIA drivers (GPU-accelerated TTS)
+### 7. NVIDIA GPU drivers (optional TTS acceleration)
 
-For NVIDIA GPU acceleration, ensure that you have a compatible GPU and an up-to-date graphics driver.
+Chatterbox can use CPU-only PyTorch or CUDA-enabled PyTorch.
 
-Download drivers from the [official NVIDIA website](https://www.nvidia.com/Download/index.aspx).
+For GPU acceleration, install a compatible NVIDIA graphics driver.
 
-Verify that Windows recognises your NVIDIA GPU:
+Verify GPU detection:
 
 ```powershell
 nvidia-smi
 ```
 
-If the command succeeds, it should display the GPU model, driver version, and memory information.
+The TTS installer uses the `tts.device` configuration setting.
 
-A separately installed CUDA Toolkit is not necessarily required. A later installer stage is intended to manage appropriate CUDA-enabled PyTorch packages where supported.
+| Setting | Behaviour |
+|---|---|
+| `auto` | Select CUDA when an NVIDIA GPU is detected; otherwise CPU |
+| `cpu` | Use CPU-only PyTorch |
+| `cuda` | Use CUDA 12.6 PyTorch |
 
-NVIDIA acceleration is optional in the prerequisite checker. CPU-based TTS compatibility and performance are not yet verified.
+The project's CUDA package versions are based on a working installation using PyTorch `2.6.0+cu126`.
+
+A separate CUDA Toolkit installation is not required for the precompiled wheels. A sufficiently recent, compatible NVIDIA driver is required.
+
+**Important:** Automatic GPU detection does not guarantee successful CUDA inference. Actual GPU execution must still be verified on the target hardware.
 
 ## Prerequisite checks
 
-Once the external software for your selected components is installed, use the project's read-only prerequisite checker.
-
-It identifies missing applications, reports installed versions, and highlights potential compatibility issues without modifying your system.
+The prerequisite checker reports detected software and potential compatibility issues.
 
 Check all components:
 
@@ -200,254 +220,597 @@ Check all components:
 .\scripts\check-prerequisites.ps1 -Cloud -Local -Voice
 ```
 
-Check individual components:
-
-**Cloud agents:**
+Or check components independently:
 
 ```powershell
 .\scripts\check-prerequisites.ps1 -Cloud
 ```
 
-**Local agents:**
-
 ```powershell
 .\scripts\check-prerequisites.ps1 -Local
 ```
-
-**Text-to-speech:**
 
 ```powershell
 .\scripts\check-prerequisites.ps1 -Voice
 ```
 
-The checker reports:
+The checker uses the following result categories:
 
-- `PASS` — The prerequisite was detected successfully.
-- `WARN` — A potential issue needs reviewing.
-- `FAIL` — A required prerequisite is missing or a check failed.
-- `INFO` — Additional setup or verification is required.
+| Result | Meaning |
+|---|---|
+| `PASS` | A prerequisite was detected successfully |
+| `WARN` | A potential issue requires attention |
+| `FAIL` | A required prerequisite is missing or a check failed |
+| `INFO` | Additional information or verification is required |
 
-A successful prerequisite check does not guarantee that every software version or dependency combination is supported.
+A successful prerequisite check does not guarantee successful cloud authentication, model inference, or TTS generation.
 
 ## Configuration
 
-Configuration uses built-in defaults, so **no `config/config.json` file is required**.
+The project includes built-in defaults in:
 
-The project loads settings from:
+```text
+config/defaults.json
+```
 
-1. `config/defaults.json` — Built-in application defaults.
-2. `config/config.json` — Optional user-defined overrides.
+You can optionally override individual settings using:
 
-User configuration files only need to contain the settings you want to change. Everything else inherits its default value.
+```text
+config/config.json
+```
 
-### Creating a configuration file
+The user-specific configuration file is excluded from Git.
 
-Copy the provided example:
+### Create a configuration file
+
+Copy the example:
 
 ```powershell
 Copy-Item .\config\config.json.example .\config\config.json
 ```
 
-Then edit `config/config.json` as needed.
+Edit only the values you want to override.
 
-For example, to change the TTS idle timeout:
+For example:
 
 ```json
 {
+  "agents": {
+    "local": {
+      "model": "qwen3:8b"
+    }
+  },
   "tts": {
-    "idleTimeoutMinutes": 30
+    "device": "auto",
+    "defaultVoice": "default",
+    "idleTimeoutMinutes": 10,
+    "autoStart": true,
+    "port": 18765
   }
 }
 ```
 
-An idle timeout of `0` is intended to disable automatic shutdown once the setting is integrated with the TTS service.
+The configuration loader merges overrides with the built-in defaults.
 
-### Inspecting configuration
+It validates settings and rejects unsupported or unknown values.
 
-Display the effective configuration:
+### Inspect configuration
+
+Show the effective configuration:
 
 ```powershell
 .\scripts\config.ps1 -Show
 ```
 
-Validate configuration:
+Validate it:
 
 ```powershell
 .\scripts\config.ps1 -Validate
 ```
 
-You can also generate a complete configuration from the built-in defaults:
+Generate a configuration from defaults:
 
 ```powershell
 .\scripts\config.ps1 -Init
 ```
 
-The configuration system supports partial overrides, validates values, and rejects unknown settings.
+### Installation directory
 
-The user-specific `config/config.json` file is excluded from Git.
+The default installation directory is:
 
-**Note:** The installer uses configuration settings for selected components, installation directory, and agent models. TTS settings are validated but are not yet applied to a service.
+```text
+%USERPROFILE%\AI\WindowsHybridAgenticStack
+```
+
+You do not need to specify this path when running the installer.
+
+The installation directory can be overridden through `config/config.json` or the root installer's optional `-InstallPath` parameter.
+
+The root installer passes the selected directory to individual components so they use the same installation.
 
 ## PowerShell execution policy
 
-On a fresh Windows installation, PowerShell may block `.ps1` scripts with an error stating that script execution is disabled. The agent command installer creates a loader in the current user/current host Windows PowerShell profile. For the four functions to load in a normal new session, the execution policy must permit that profile to run.
+Windows PowerShell may block script execution on systems with restrictive execution policies.
 
-For scripts you trust, enable execution in the current PowerShell session:
+For a temporary override in the current PowerShell session:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 ```
 
-This applies only to the current session and does not permanently change your execution policy. It is useful for launching the installer, but **does not enable automatic profile loading in future sessions**.
+This change is temporary and does not permit automatic profile loading in later sessions.
 
-Alternatively, run an individual script using:
+When installing agent commands, the installer may offer to configure `RemoteSigned` for the current user. It makes this change only after confirmation.
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\check-prerequisites.ps1"
-```
+The installer does not intentionally override machine-wide or Group Policy restrictions.
 
-During agent command installation, the installer checks persistent execution-policy settings. If normal profile loading would be blocked, it offers to set `RemoteSigned` for `CurrentUser`, and changes it **only with explicit confirmation**. It does not change the machine-wide policy or override Group Policy. If you decline, the profile loader may remain blocked.
-
-`RemoteSigned` permits locally created scripts and imposes additional requirements on downloaded scripts; it is not a security boundary. Organisation-managed execution policies may prevent these overrides.
-
-See [Troubleshooting](docs/troubleshooting.md) for additional information.
+Execution policies are not a security boundary. Only run scripts from sources you trust.
 
 ## Installation
 
-> **Development status:** The installer configures cloud and local OpenCode agents, downloads selected Ollama models with confirmation, and installs four PowerShell agent commands. Chatterbox and voice support are not yet installed.
+Open Windows PowerShell in the repository root.
 
-Before running the installer, follow the [prerequisite installation instructions](#installing-prerequisites) for your chosen components.
+### Interactive installation
 
-### Run the installer
-
-From the repository root, open Windows PowerShell and run:
+Run:
 
 ```powershell
 .\install.ps1
 ```
 
-The installer will prompt you to select cloud agents, local agents, text-to-speech, or a combination.
+The installer prompts you to select the components you want.
 
-Alternatively, specify components directly:
+### Select components explicitly
+
+Cloud agents only:
 
 ```powershell
-# Cloud agents only
 .\install.ps1 -Cloud
+```
 
-# Local agents only
+Local agents only:
+
+```powershell
 .\install.ps1 -Local
+```
 
-# Cloud and local agents
+Voice only:
+
+```powershell
+.\install.ps1 -Voice
+```
+
+Cloud and local agents:
+
+```powershell
 .\install.ps1 -Cloud -Local
+```
 
-# Select voice too (TTS setup is not yet implemented)
+All components:
+
+```powershell
 .\install.ps1 -Cloud -Local -Voice
 ```
 
-To specify a custom installation directory:
+To use a custom installation directory:
 
 ```powershell
-.\install.ps1 -Cloud -Local -InstallPath 'D:\AI\AgentStack'
+.\install.ps1 -Cloud -Local -Voice -InstallPath 'D:\AI\AgentStack'
 ```
 
-If no installation directory is provided, the installer uses the configured directory or its built-in default.
+Specifying component switches selects those components without the interactive component-selection questions.
 
-### Current installer functionality
+The installer still prompts before proceeding with installation.
 
-The installer currently:
+### What the installer does
 
-- Loads `config/defaults.json` and optional `config/config.json` overrides.
-- Allows interactive or command-line component selection.
-- Resolves the installation directory and checks selected prerequisites.
-- Stops when required prerequisites are missing, before configuring agents.
-- Creates a stack-specific `opencode.json` for the chosen agent models.
-- Checks for the selected Ollama model and asks before downloading it.
-- Adds cloud or local agents to an existing stack configuration, preserving the other component and unrelated settings.
-- Verifies that OpenCode lists the configured local model before saving changes.
-- Backs up an existing OpenCode configuration when an update is needed; repeat runs leave unchanged configurations alone.
-- Registers `ps-read` and `ps-write` with separate read-only and write-capable permissions and installs Windows PowerShell agent instructions.
-- Copies agent command scripts and configuration into the chosen installation directory so the Git checkout is not needed for everyday command use.
-- Adds an idempotent, marked loader to the current user/current host Windows PowerShell profile without removing unrelated profile content.
-- Offers, with confirmation, to enable `RemoteSigned` for `CurrentUser` if normal profile loading is blocked.
+Depending on the selected components, the installer:
 
-OpenCode and Ollama must already be installed as external prerequisites. The installer **does not** install those applications, authenticate OpenAI, verify cloud inference, or install Chatterbox TTS. Selecting `-Voice` currently reports that TTS installation is not implemented.
+- Loads and validates configuration.
+- Checks the required external prerequisites.
+- Creates a stack-specific OpenCode configuration.
+- Configures the cloud and/or local agent models.
+- Offers to download a missing Ollama model.
+- Installs `ps-read` and `ps-write` agent permissions.
+- Registers PowerShell agent commands.
+- Creates an isolated Python 3.11 environment for Chatterbox.
+- Automatically selects CPU or CUDA PyTorch when TTS is selected.
+- Installs Chatterbox Turbo and its Python dependencies.
+- Verifies Python package compatibility and key package versions.
+- Copies TTS service and command files into the installation directory.
+- Registers TTS commands in the current user's PowerShell profile.
 
-### Using the stack-specific OpenCode configuration
+Repeat installations attempt to reuse existing installations and preserve unrelated PowerShell profile content.
 
-The installer saves its OpenCode configuration at `opencode.json` inside the chosen installation directory. By default, this is:
+Changed installed files are backed up where supported.
+
+### Chatterbox Python environment
+
+The TTS installer is located at:
 
 ```text
-%USERPROFILE%\AI\WindowsHybridAgenticStack\opencode.json
+tts/install-tts.ps1
 ```
 
-To use it in the current PowerShell session:
+It can also be run independently:
 
 ```powershell
-$env:OPENCODE_CONFIG = Join-Path $HOME 'AI\WindowsHybridAgenticStack\opencode.json'
-opencode models
+.\tts\install-tts.ps1
 ```
 
-If you used `-InstallPath`, use the `opencode.json` in that directory instead.
+To prepare only the Python virtual environment:
 
-This keeps the stack configuration separate from the user's global OpenCode configuration. The setting applies only to the current PowerShell session; the installed agent commands set `OPENCODE_CONFIG` while they run and restore its previous value afterwards.
+```powershell
+.\tts\install-tts.ps1 -PrepareOnly
+```
 
-`opencode models` confirms that OpenCode can load and list configured models. It does **not** guarantee successful inference or OpenAI authentication. Local inference also requires the Ollama service to be running.
+To force CPU installation:
 
-### PowerShell agent commands
+```powershell
+.\tts\install-tts.ps1 -Device cpu
+```
 
-After installing cloud or local agents, open a **new Windows PowerShell 5.1 window**. The installer registers four functions in your PowerShell profile:
+To request CUDA installation explicitly:
 
-| Command | Model selection | OpenCode agent | Purpose |
-|---|---|---|---|
-| `agent` | Cloud | `ps-read` | Read-only cloud assistant |
-| `agentdo` | Cloud | `ps-write` | Write-capable cloud assistant |
-| `localagent` | Local (Ollama) | `ps-read` | Read-only local assistant |
-| `localagentdo` | Local (Ollama) | `ps-write` | Write-capable local assistant |
+```powershell
+.\tts\install-tts.ps1 -Device cuda
+```
 
-The model defaults come from `config/config.json` (or built-in defaults) as copied into the installed runtime when the installer runs. Re-run the installer after changing the repository configuration to apply those overrides to the installed runtime. A command's provider must have been configured during installation; installing cloud-only does not download or configure a local model.
+For normal use, omit `-Device` so the installer uses the configured default of `auto`.
+
+The initial reference dependency versions include:
+
+| Package | Version |
+|---|---|
+| Chatterbox TTS | 0.1.7 |
+| PyTorch | 2.6.0 |
+| TorchAudio | 2.6.0 |
+| TorchVision | 0.21.0 |
+| Transformers | 5.2.0 |
+| Diffusers | 0.29.0 |
+| NumPy | 1.26.4 |
+
+The CPU and CUDA PyTorch installations use different wheel indexes but matching package versions.
+
+## Using the AI agents
+
+After installation, open a new Windows PowerShell window.
+
+The project provides four commands:
+
+| Command | Model | Permissions |
+|---|---|---|
+| `agent` | Cloud | Read-only |
+| `agentdo` | Cloud | Write-capable |
+| `localagent` | Ollama | Read-only |
+| `localagentdo` | Ollama | Write-capable |
+
+Examples:
 
 ```powershell
 agent "Explain the difference between RAM and storage"
+```
+
+```powershell
 agentdo "Create a notes.txt file in the current directory"
+```
+
+```powershell
 localagent "Explain this PowerShell script"
+```
+
+```powershell
 localagentdo "Create a summary.txt file in the current directory"
 ```
 
-All four commands accept the same options:
+### Agent options
+
+All four commands support the same options:
 
 | Option | Behaviour |
 |---|---|
-| `-m MODEL`, `--model MODEL` | Override the configured model for this invocation |
-| `-l`, `--log` | Show full OpenCode execution output instead of only the final answer |
-| `-h`, `--help` | Show usage and examples |
-| `-v`, `--voice` | Reserved for future Chatterbox support; currently reports an error |
+| `-m MODEL`, `--model MODEL` | Override the model for this invocation |
+| `-l`, `--log` | Show full OpenCode output |
+| `-h`, `--help` | Show usage information |
+| `-v`, `--voice` | Speak the final answer using Chatterbox |
 
 Examples:
 
 ```powershell
 localagent -m qwen3:0.6b "What is 2 plus 2?"
+```
+
+```powershell
 agent --model openai/gpt-6-luna "Explain this error"
+```
+
+```powershell
 localagent --log "Explain this PowerShell command"
+```
+
+```powershell
 agentdo --help
 ```
 
-By default the wrappers parse OpenCode JSON events and show the final text response. `--log` displays OpenCode's normal terminal output. The wrappers handle UTF-8 output and restore the prior console encoding after execution.
+### Speaking agent responses
 
-`ps-read` denies command execution and file editing; it can inspect supported files but cannot run PowerShell commands to retrieve live system information. `ps-write` permits execution and editing within OpenCode's other permission boundaries. Operations outside the working directory can still require permission and may be rejected during non-interactive runs. The agent instructions target Windows PowerShell 5.1 and do not depend on Git Bash, WSL, or PowerShell 7.
+To speak a response using the configured default voice:
 
-The installer uses the chosen installation directory for the runtime and adds a marked loader to the current user/current host PowerShell profile. It keeps unrelated profile content and avoids duplicate loaders on repeat installs. If a new PowerShell session doesn't recognise the commands, check the [execution-policy guidance](#powershell-execution-policy) and the current profile with `Get-Content $PROFILE`.
+```powershell
+agent -v "Explain gravity"
+```
 
-**Testing status:** Local inference, write operations, read-only restrictions, `--log`, Unicode output, repeat installation and profile loading have been tested in Windows Sandbox. Cloud authentication and inference are not yet verified by the installer.
+```powershell
+localagent -v "What is 2 plus 2?"
+```
 
-If PowerShell blocks the installer, see [PowerShell execution policy](#powershell-execution-policy).
+To select a custom voice:
+
+```powershell
+agent -v myvoice "Explain gravity"
+```
+
+The voice name comes immediately after `-v`, followed by the prompt.
+
+Voice output can also be combined with full logging:
+
+```powershell
+localagent -v -l "What is 2 plus 2?"
+```
+
+The command displays the OpenCode events and passes the final answer to Chatterbox.
+
+**Voice integration has passed mock testing. End-to-end speech output has not yet been verified in the project installation.**
+
+### Agent permissions
+
+`ps-read` is designed for read-only interactions and denies command execution and file editing.
+
+`ps-write` allows execution and editing within OpenCode's permission system.
+
+Other OpenCode restrictions remain active. For example, an operation outside the working directory may require approval or be rejected.
+
+The supplied agent instructions target Windows PowerShell 5.1 and do not depend on WSL, Git Bash, or PowerShell 7.
+
+### OpenCode configuration isolation
+
+The project stores its own OpenCode configuration at:
+
+```text
+%USERPROFILE%\AI\WindowsHybridAgenticStack\opencode.json
+```
+
+This is separate from the user's global OpenCode configuration.
+
+Agent commands temporarily use the stack-specific configuration and restore the previous environment setting afterward.
+
+To inspect the installed model configuration manually:
+
+```powershell
+$env:OPENCODE_CONFIG = Join-Path $HOME 'AI\WindowsHybridAgenticStack\opencode.json'
+```
+
+```powershell
+opencode models
+```
+
+Listing a model confirms configuration visibility, not successful model inference or authentication.
+
+## Chatterbox TTS commands
+
+After voice installation, open a new Windows PowerShell window.
+
+The installer registers the following commands:
+
+| Command | Purpose |
+|---|---|
+| `tts-start` | Start the Chatterbox service |
+| `tts-stop` | Stop the Chatterbox service |
+| `tts-status` | Display service status |
+| `tts-say` | Generate and play speech |
+| `tts-voice-list` | List locally cached voices |
+| `tts-voice-add` | Create a voice profile from a WAV reference |
+| `tts-voice-remove` | Remove a custom voice profile |
+| `tts-voice-test` | Test a custom voice |
+
+### Start and stop the service
+
+```powershell
+tts-start
+```
+
+```powershell
+tts-status
+```
+
+```powershell
+tts-stop
+```
+
+When automatic startup is enabled, requesting speech starts the service if it is not already running.
+
+The service listens on `127.0.0.1` and uses the configured port, defaulting to `18765`.
+
+The default idle timeout is ten minutes.
+
+### Generate speech
+
+```powershell
+tts-say "Hello, this is a test of Chatterbox Turbo."
+```
+
+To specify a voice using PowerShell parameters:
+
+```powershell
+tts-say -Text "Hello from my custom voice." -Voice "myvoice"
+```
+
+### Manage voices
+
+List available voices:
+
+```powershell
+tts-voice-list
+```
+
+Create a custom voice from a suitable WAV recording:
+
+```powershell
+tts-voice-add -Path 'C:\VoiceSamples\sample.wav' -Name 'myvoice'
+```
+
+Test a custom voice:
+
+```powershell
+tts-voice-test myvoice
+```
+
+Remove a custom voice:
+
+```powershell
+tts-voice-remove myvoice
+```
+
+Custom voices are stored inside the stack installation's `voices` directory.
+
+The built-in `default` voice is reserved and cannot be removed.
+
+**Only create voice profiles using recordings you have permission to use.**
+
+## Troubleshooting
+
+### PyTorch fails to load `c10.dll`
+
+An error such as:
+
+```text
+OSError: [WinError 126] Error loading torch\lib\c10.dll
+```
+
+may indicate that Microsoft Visual C++ Redistributable (x64) is missing.
+
+Install it using:
+
+```powershell
+winget install --id Microsoft.VCRedist.2015+.x64 --exact --source winget
+```
+
+Then reopen PowerShell and retry the installation or import.
+
+### Chatterbox starts, then stops
+
+Inspect the error log:
+
+```powershell
+Get-Content "$HOME\AI\WindowsHybridAgenticStack\tts\service-errors.log" -Tail 80
+```
+
+Inspect normal service output:
+
+```powershell
+Get-Content "$HOME\AI\WindowsHybridAgenticStack\tts\service.log" -Tail 40
+```
+
+These default paths assume the standard installation directory. Adjust them if you configured a custom location.
+
+### Windows error 1455 during model loading
+
+If the error log contains:
+
+```text
+OSError: The paging file is too small for this operation to complete.
+(os error 1455)
+```
+
+Windows does not have enough available committed memory to load the model.
+
+This occurred during testing in a Windows Sandbox instance with 4 GB RAM.
+
+The Python packages installed correctly, but Chatterbox Turbo could not load its model.
+
+Use a machine with sufficient available RAM and virtual memory. CPU inference may also be substantially slower than GPU inference.
+
+### TTS commands are not recognised
+
+Open a new Windows PowerShell window after installation.
+
+Check the command registration:
+
+```powershell
+Get-Command tts-start,tts-stop,tts-status,tts-say
+```
+
+If commands are missing, check the current PowerShell profile and execution policy:
+
+```powershell
+Get-Content $PROFILE.CurrentUserCurrentHost
+```
+
+```powershell
+Get-ExecutionPolicy -List
+```
+
+### CUDA is unavailable
+
+Check your NVIDIA GPU:
+
+```powershell
+nvidia-smi
+```
+
+Check CUDA availability using the installed Python environment:
+
+```powershell
+& "$HOME\AI\WindowsHybridAgenticStack\.venv\Scripts\python.exe" -c "import torch; print('CUDA available:', torch.cuda.is_available())"
+```
+
+If CUDA is unavailable, verify your driver and installed PyTorch build.
+
+### OpenCode commands are not recognised
+
+Open a new PowerShell window and check:
+
+```powershell
+Get-Command agent,agentdo,localagent,localagentdo
+```
+
+Check your profile configuration:
+
+```powershell
+Get-Content $PROFILE.CurrentUserCurrentHost
+```
+
+If script execution is blocked, review [PowerShell execution policy](#powershell-execution-policy).
+
+## Testing status
+
+The project has been tested incrementally using Windows Sandbox.
+
+| Feature | Status |
+|---|---|
+| Python 3.11 environment creation | Passed |
+| TTS environment repeat installation | Passed |
+| CPU PyTorch installation | Passed |
+| Chatterbox dependency installation | Passed |
+| Python dependency compatibility | Passed |
+| Chatterbox Turbo import | Passed after installing Visual C++ Redistributable |
+| TTS PowerShell command registration | Passed |
+| TTS profile loader idempotence | Passed |
+| Agent-to-TTS integration | Passed with mocked speech |
+| Full TTS model loading in 4 GB Sandbox | Failed due to insufficient committed memory |
+| Actual CPU speech generation | Not yet verified |
+| CUDA installation and inference | Not yet verified |
+| Cloud model authentication and inference | Not verified by installer |
+
+Passing the installation and import checks does not mean speech generation has been fully validated.
 
 ## Development
 
-Development is carried out incrementally, with changes tested on an existing Windows installation and in a clean Windows Sandbox environment.
-
-Actual GPU-accelerated TTS inference must also be tested on compatible hardware, as Windows Sandbox does not provide the same CUDA access as the host.
+Development is carried out incrementally, with changes tested in Windows Sandbox before commits.
 
 The project uses [Conventional Commits](https://www.conventionalcommits.org/) with scoped commit messages.
+
+Future work includes additional end-to-end TTS verification, CUDA testing, and uninstallation support.
 
 ## License
 
