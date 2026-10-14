@@ -4,7 +4,7 @@ A configurable Windows AI agent toolkit combining local language models, cloud A
 
 The goal is to provide a straightforward way to set up a hybrid AI environment on Windows, with PowerShell commands for interacting with local and cloud models and optional spoken responses.
 
-> **Development status:** This project is under active development. Prerequisite detection and configuration management are implemented. Automated installation, agent integration, and text-to-speech integration are still being developed.
+> **Development status:** This project is under active development. Prerequisite detection, configuration management, and the installer preflight workflow are implemented. Automated component installation and agent/TTS integration are still being developed.
 
 ## Features
 
@@ -312,21 +312,56 @@ See [Troubleshooting](docs/troubleshooting.md) for additional information.
 
 ## Installation
 
-Automated project installation is not yet available.
+> **Development status:** The installer currently supports component selection, configuration loading, and prerequisite checks. Actual installation of AI agents and text-to-speech is not yet implemented.
 
-The intended installation workflow is:
+Before running the installer, follow the [prerequisite installation instructions](#installing-prerequisites) for your chosen components.
 
-1. Install the required external prerequisites using the instructions above.
-2. Clone this repository.
-3. Run the prerequisite checker for your selected components.
-4. Run `install.ps1` once it becomes available.
-5. Select cloud agents, local agents, TTS, or a combination.
-6. Allow the installer to configure the selected components and their project-specific dependencies.
-7. Verify that your AI agents and optional voice output work correctly.
+### Run the installer
 
-Installation locations will be configurable rather than tied to a particular Windows user directory.
+From the repository root, open Windows PowerShell and run:
 
-The installer will be designed to preserve existing user settings and make PowerShell profile changes safely and reversibly.
+```powershell
+.\install.ps1
+```
+
+The installer will prompt you to select cloud agents, local agents, text-to-speech, or a combination.
+
+Alternatively, specify components directly:
+
+```powershell
+# Cloud agents only
+.\install.ps1 -Cloud
+
+# Local agents only
+.\install.ps1 -Local
+
+# Cloud and local agents with TTS
+.\install.ps1 -Cloud -Local -Voice
+```
+
+To specify a custom installation directory:
+
+```powershell
+.\install.ps1 -Cloud -Local -InstallPath 'D:\AI\AgentStack'
+```
+
+If no installation directory is provided, the installer uses the configured directory or its built-in default.
+
+### Current installer functionality
+
+The installer currently:
+
+- Loads built-in defaults and optional user configuration.
+- Allows interactive or command-line component selection.
+- Resolves the installation directory.
+- Checks prerequisites for selected components.
+- Reports missing dependencies and exits without modifying the system.
+
+**The installer does not yet install or configure OpenCode, Ollama models, Chatterbox, or PowerShell agent commands.**
+
+These features will be added as development progresses.
+
+If PowerShell blocks the installer, see [PowerShell execution policy](#powershell-execution-policy).
 
 ## Development
 
