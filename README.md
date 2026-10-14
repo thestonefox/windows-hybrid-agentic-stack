@@ -4,7 +4,7 @@ A configurable Windows AI agent toolkit combining local language models, cloud A
 
 The goal is to provide a straightforward way to set up a hybrid AI environment on Windows, with PowerShell commands for interacting with local and cloud models and optional spoken responses.
 
-> **Development status:** This project is under active development. Prerequisite detection, configuration management, and OpenCode/Ollama agent configuration are implemented. PowerShell agent commands, Chatterbox installation, and TTS integration are still being developed.
+> **Development status:** This project is under active development. Prerequisite detection, configuration management, OpenCode/Ollama agent setup, and four PowerShell agent commands are implemented. Chatterbox installation, voice output, and uninstallation are still being developed.
 
 ## Features
 
@@ -19,7 +19,7 @@ The project is designed around four main components:
 
 - Independent setup of cloud and local agents; optional TTS installation is planned.
 - Configurable agent model selection; TTS configuration is implemented but not yet applied to a service.
-- PowerShell commands for AI agents and spoken responses.
+- PowerShell commands for cloud and local AI agents are implemented; spoken responses are planned.
 - Automatic startup and idle shutdown of the TTS service.
 - Runtime configuration changes where supported.
 - Installation and uninstallation scripts.
@@ -290,7 +290,7 @@ The user-specific `config/config.json` file is excluded from Git.
 
 ## PowerShell execution policy
 
-On a fresh Windows installation, PowerShell may block `.ps1` scripts with an error stating that script execution is disabled.
+On a fresh Windows installation, PowerShell may block `.ps1` scripts with an error stating that script execution is disabled. The agent command installer creates a loader in the current user/current host Windows PowerShell profile. For the four functions to load in a normal new session, the execution policy must permit that profile to run.
 
 For scripts you trust, enable execution in the current PowerShell session:
 
@@ -298,7 +298,7 @@ For scripts you trust, enable execution in the current PowerShell session:
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 ```
 
-This applies only to the current session and does not permanently change your execution policy.
+This applies only to the current session and does not permanently change your execution policy. It is useful for launching the installer, but **does not enable automatic profile loading in future sessions**.
 
 Alternatively, run an individual script using:
 
@@ -306,13 +306,15 @@ Alternatively, run an individual script using:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\check-prerequisites.ps1"
 ```
 
-Organisation-managed execution policies may prevent these overrides.
+During agent command installation, the installer checks persistent execution-policy settings. If normal profile loading would be blocked, it offers to set `RemoteSigned` for `CurrentUser`, and changes it **only with explicit confirmation**. It does not change the machine-wide policy or override Group Policy. If you decline, the profile loader may remain blocked.
+
+`RemoteSigned` permits locally created scripts and imposes additional requirements on downloaded scripts; it is not a security boundary. Organisation-managed execution policies may prevent these overrides.
 
 See [Troubleshooting](docs/troubleshooting.md) for additional information.
 
 ## Installation
 
-> **Development status:** The installer configures cloud and local OpenCode agents, can download selected Ollama models, and supports incremental setup. PowerShell agent commands and Chatterbox installation are not yet implemented.
+> **Development status:** The installer configures cloud and local OpenCode agents, downloads selected Ollama models with confirmation, and installs four PowerShell agent commands. Chatterbox and voice support are not yet installed.
 
 Before running the installer, follow the [prerequisite installation instructions](#installing-prerequisites) for your chosen components.
 
@@ -335,7 +337,10 @@ Alternatively, specify components directly:
 # Local agents only
 .\install.ps1 -Local
 
-# Cloud and local agents with TTS
+# Cloud and local agents
+.\install.ps1 -Cloud -Local
+
+# Select voice too (TTS setup is not yet implemented)
 .\install.ps1 -Cloud -Local -Voice
 ```
 
@@ -360,8 +365,12 @@ The installer currently:
 - Adds cloud or local agents to an existing stack configuration, preserving the other component and unrelated settings.
 - Verifies that OpenCode lists the configured local model before saving changes.
 - Backs up an existing OpenCode configuration when an update is needed; repeat runs leave unchanged configurations alone.
+- Registers `ps-read` and `ps-write` with separate read-only and write-capable permissions and installs Windows PowerShell agent instructions.
+- Copies agent command scripts and configuration into the chosen installation directory so the Git checkout is not needed for everyday command use.
+- Adds an idempotent, marked loader to the current user/current host Windows PowerShell profile without removing unrelated profile content.
+- Offers, with confirmation, to enable `RemoteSigned` for `CurrentUser` if normal profile loading is blocked.
 
-OpenCode and Ollama must already be installed as external prerequisites. The installer **does not** install those applications, authenticate OpenAI, verify cloud inference, install PowerShell agent commands, or install Chatterbox TTS.
+OpenCode and Ollama must already be installed as external prerequisites. The installer **does not** install those applications, authenticate OpenAI, verify cloud inference, or install Chatterbox TTS. Selecting `-Voice` currently reports that TTS installation is not implemented.
 
 ### Using the stack-specific OpenCode configuration
 
@@ -380,9 +389,55 @@ opencode models
 
 If you used `-InstallPath`, use the `opencode.json` in that directory instead.
 
-This keeps the stack configuration separate from the user's global OpenCode configuration. The setting applies only to the current PowerShell session; the future agent commands will handle selecting the appropriate configuration automatically.
+This keeps the stack configuration separate from the user's global OpenCode configuration. The setting applies only to the current PowerShell session; the installed agent commands set `OPENCODE_CONFIG` while they run and restore its previous value afterwards.
 
 `opencode models` confirms that OpenCode can load and list configured models. It does **not** guarantee successful inference or OpenAI authentication. Local inference also requires the Ollama service to be running.
+
+### PowerShell agent commands
+
+After installing cloud or local agents, open a **new Windows PowerShell 5.1 window**. The installer registers four functions in your PowerShell profile:
+
+| Command | Model selection | OpenCode agent | Purpose |
+|---|---|---|---|
+| `agent` | Cloud | `ps-read` | Read-only cloud assistant |
+| `agentdo` | Cloud | `ps-write` | Write-capable cloud assistant |
+| `localagent` | Local (Ollama) | `ps-read` | Read-only local assistant |
+| `localagentdo` | Local (Ollama) | `ps-write` | Write-capable local assistant |
+
+The model defaults come from `config/config.json` (or built-in defaults) as copied into the installed runtime when the installer runs. Re-run the installer after changing the repository configuration to apply those overrides to the installed runtime. A command's provider must have been configured during installation; installing cloud-only does not download or configure a local model.
+
+```powershell
+agent "Explain the difference between RAM and storage"
+agentdo "Create a notes.txt file in the current directory"
+localagent "Explain this PowerShell script"
+localagentdo "Create a summary.txt file in the current directory"
+```
+
+All four commands accept the same options:
+
+| Option | Behaviour |
+|---|---|
+| `-m MODEL`, `--model MODEL` | Override the configured model for this invocation |
+| `-l`, `--log` | Show full OpenCode execution output instead of only the final answer |
+| `-h`, `--help` | Show usage and examples |
+| `-v`, `--voice` | Reserved for future Chatterbox support; currently reports an error |
+
+Examples:
+
+```powershell
+localagent -m qwen3:0.6b "What is 2 plus 2?"
+agent --model openai/gpt-6-luna "Explain this error"
+localagent --log "Explain this PowerShell command"
+agentdo --help
+```
+
+By default the wrappers parse OpenCode JSON events and show the final text response. `--log` displays OpenCode's normal terminal output. The wrappers handle UTF-8 output and restore the prior console encoding after execution.
+
+`ps-read` denies command execution and file editing; it can inspect supported files but cannot run PowerShell commands to retrieve live system information. `ps-write` permits execution and editing within OpenCode's other permission boundaries. Operations outside the working directory can still require permission and may be rejected during non-interactive runs. The agent instructions target Windows PowerShell 5.1 and do not depend on Git Bash, WSL, or PowerShell 7.
+
+The installer uses the chosen installation directory for the runtime and adds a marked loader to the current user/current host PowerShell profile. It keeps unrelated profile content and avoids duplicate loaders on repeat installs. If a new PowerShell session doesn't recognise the commands, check the [execution-policy guidance](#powershell-execution-policy) and the current profile with `Get-Content $PROFILE`.
+
+**Testing status:** Local inference, write operations, read-only restrictions, `--log`, Unicode output, repeat installation and profile loading have been tested in Windows Sandbox. Cloud authentication and inference are not yet verified by the installer.
 
 If PowerShell blocks the installer, see [PowerShell execution policy](#powershell-execution-policy).
 

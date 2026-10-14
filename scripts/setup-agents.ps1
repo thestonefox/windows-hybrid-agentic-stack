@@ -5,13 +5,13 @@
     Configure OpenCode and Ollama agents.
 
 .DESCRIPTION
-    Creates or updates a stack-specific OpenCode configuration.
+    Creates or updates the stack-specific OpenCode configuration.
 
     Preserves existing components and unrelated settings.
-    Does not modify global OpenCode configuration.
-
+    Installs Windows PowerShell agent instructions.
+    Registers ps-read and ps-write.
     Downloads missing Ollama models with confirmation.
-    Validates proposed configuration before saving it.
+    Validates configuration before saving changes.
 #>
 
 [CmdletBinding()]
@@ -27,6 +27,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$instructionsSource = Join-Path $repoRoot 'config\AGENTS.md'
 
 function Confirm-Action {
     param([string]$Question)
@@ -51,14 +54,9 @@ function Confirm-Action {
 
 function Set-JsonProperty {
     param(
-        [Parameter(Mandatory = $true)]
         [pscustomobject]$Object,
-
-        [Parameter(Mandatory = $true)]
         [string]$Name,
-
-        [AllowNull()]
-        [object]$Value
+        [AllowNull()][object]$Value
     )
 
     if ($null -ne $Object.PSObject.Properties[$Name]) {
@@ -108,23 +106,38 @@ function Assert-OllamaProvider {
         throw 'Existing Ollama provider uses a different SDK.'
     }
 
-    if ($null -eq $Provider.options -or
-        $Provider.options -isnot [pscustomobject]) {
+    if ($Provider.options -isnot [pscustomobject]) {
         throw 'Existing Ollama provider has invalid options.'
     }
 
-    $baseUrl = [string]$Provider.options.baseURL
-
-    if ($baseUrl -notin @(
+    if ($Provider.options.baseURL -notin @(
         'http://127.0.0.1:11434/v1',
         'http://localhost:11434/v1'
     )) {
-        throw "Existing Ollama provider has a different URL: $baseUrl"
+        throw 'Existing Ollama provider uses a different URL.'
     }
 
-    if ($null -eq $Provider.models -or
-        $Provider.models -isnot [pscustomobject]) {
+    if ($Provider.models -isnot [pscustomobject]) {
         throw 'Existing Ollama provider has invalid models.'
+    }
+}
+
+function Assert-AgentDefinition {
+    param(
+        [pscustomobject]$Existing,
+        [pscustomobject]$Expected,
+        [string]$Name
+    )
+
+    $actual = $Existing | ConvertTo-Json -Depth 20 -Compress
+    $required = $Expected | ConvertTo-Json -Depth 20 -Compress
+
+    if ($actual -cne $required) {
+        throw @"
+Existing $Name definition differs from this stack.
+No agent permissions have been overwritten.
+Review the existing OpenCode configuration.
+"@
     }
 }
 
@@ -136,18 +149,12 @@ try {
         exit 0
     }
 
+    if (-not (Test-Path -LiteralPath $instructionsSource -PathType Leaf)) {
+        throw "Instructions file missing: $instructionsSource"
+    }
+
     if ([string]::IsNullOrWhiteSpace($InstallPath)) {
         throw 'InstallPath cannot be empty.'
-    }
-
-    if ($Cloud -and
-        [string]::IsNullOrWhiteSpace($CloudModel)) {
-        throw 'Cloud model cannot be empty.'
-    }
-
-    if ($Local -and
-        [string]::IsNullOrWhiteSpace($LocalModel)) {
-        throw 'Local model cannot be empty.'
     }
 
     $InstallPath = [Environment]::ExpandEnvironmentVariables(
@@ -159,6 +166,8 @@ try {
     )
 
     $configPath = Join-Path $InstallPath 'opencode.json'
+    $instructionsPath = Join-Path $InstallPath 'AGENTS.md'
+
     $existingFile = Test-Path -LiteralPath $configPath
 
     if ($existingFile) {
@@ -166,13 +175,11 @@ try {
             throw "Configuration path is not a file: $configPath"
         }
 
-        $originalJson = Get-Content `
-            -LiteralPath $configPath -Raw
-
+        $originalJson = Get-Content -LiteralPath $configPath -Raw
         $config = $originalJson | ConvertFrom-Json
 
         if ($config -isnot [pscustomobject]) {
-            throw 'Existing OpenCode configuration is not an object.'
+            throw 'Existing OpenCode configuration must be an object.'
         }
 
         Write-Host 'Loading existing OpenCode configuration.'
@@ -187,9 +194,119 @@ try {
         Write-Host 'Creating new OpenCode configuration.'
     }
 
-    # Preserve the existing default when adding local agents.
-    # When cloud agents are explicitly selected, prefer the
-    # configured cloud model as the default.
+    # Refuse to overwrite different existing instructions.
+    if (Test-Path -LiteralPath $instructionsPath) {
+        if (-not (Test-Path -LiteralPath $instructionsPath -PathType Leaf)) {
+            throw "Instructions path is not a file: $instructionsPath"
+        }
+
+        $existingInstructions = Get-Content `
+            -LiteralPath $instructionsPath -Raw
+
+        $requiredInstructions = Get-Content `
+            -LiteralPath $instructionsSource -Raw
+
+        if ($existingInstructions -cne $requiredInstructions) {
+            throw @"
+Existing instructions differ: $instructionsPath
+No instructions were overwritten.
+"@
+        }
+    }
+
+    # Enforce Windows PowerShell rather than an optional shell.
+    $shellProperty = $config.PSObject.Properties['shell']
+
+    if ($null -ne $shellProperty -and
+        $shellProperty.Value -ne 'powershell.exe') {
+        throw 'Existing OpenCode configuration uses another shell.'
+    }
+
+    Set-JsonProperty `
+        -Object $config `
+        -Name 'shell' `
+        -Value 'powershell.exe'
+
+    # Preserve existing instructions and add our file once.
+    if ($null -eq $config.PSObject.Properties['instructions']) {
+        Set-JsonProperty `
+            -Object $config `
+            -Name 'instructions' `
+            -Value @()
+    }
+
+    if ($config.instructions -isnot [array]) {
+        throw 'Existing instructions setting must be an array.'
+    }
+
+    if ($config.instructions -notcontains $instructionsPath) {
+        $newInstructions = @($config.instructions) + $instructionsPath
+
+        Set-JsonProperty `
+            -Object $config `
+            -Name 'instructions' `
+            -Value $newInstructions
+    }
+
+    # Set up both agents using explicit OpenCode permissions.
+    $readAgent = [pscustomobject]@{
+        description = 'Read-only Windows information assistant'
+        mode = 'primary'
+        permission = [pscustomobject]@{
+            bash = 'deny'
+            edit = 'deny'
+            task = 'deny'
+            webfetch = 'deny'
+            websearch = 'deny'
+        }
+    }
+
+    $writeAgent = [pscustomobject]@{
+        description = 'Windows task execution assistant'
+        mode = 'primary'
+        permission = [pscustomobject]@{
+            bash = 'allow'
+            edit = 'allow'
+            task = 'deny'
+            webfetch = 'deny'
+            websearch = 'deny'
+        }
+    }
+
+    if ($null -eq $config.PSObject.Properties['agent']) {
+        Set-JsonProperty `
+            -Object $config `
+            -Name 'agent' `
+            -Value ([pscustomobject]@{})
+    }
+
+    if ($config.agent -isnot [pscustomobject]) {
+        throw 'Existing agent configuration is invalid.'
+    }
+
+    $definitions = @{
+        'ps-read' = $readAgent
+        'ps-write' = $writeAgent
+    }
+
+    foreach ($name in @('ps-read', 'ps-write')) {
+        $expectedAgent = $definitions[$name]
+
+        if ($null -eq $config.agent.PSObject.Properties[$name]) {
+            Set-JsonProperty `
+                -Object $config.agent `
+                -Name $name `
+                -Value $expectedAgent
+        }
+        else {
+            Assert-AgentDefinition `
+                -Existing $config.agent.$name `
+                -Expected $expectedAgent `
+                -Name $name
+        }
+    }
+
+    # Select the default model.
     if ($Cloud) {
         Set-JsonProperty `
             -Object $config `
@@ -197,11 +314,11 @@ try {
             -Value $CloudModel
     }
     elseif ($Local) {
-        $currentDefault = $config.PSObject.Properties['model']
+        $currentModel = $config.PSObject.Properties['model']
 
-        if ($null -eq $currentDefault -or
+        if ($null -eq $currentModel -or
             [string]::IsNullOrWhiteSpace(
-                [string]$currentDefault.Value
+                [string]$currentModel.Value
             )) {
             Set-JsonProperty `
                 -Object $config `
@@ -210,8 +327,8 @@ try {
         }
     }
 
+    # Add the Ollama provider without removing existing models.
     if ($Local) {
-        # Preserve existing provider entries.
         if ($null -eq $config.PSObject.Properties['provider']) {
             Set-JsonProperty `
                 -Object $config `
@@ -241,26 +358,18 @@ try {
         else {
             $ollamaProvider = $config.provider.ollama
 
-            if ($ollamaProvider -isnot [pscustomobject]) {
-                throw 'Existing Ollama provider is invalid.'
-            }
-
             Assert-OllamaProvider -Provider $ollamaProvider
         }
 
-        # Add the requested model without removing other models.
         if ($null -eq $ollamaProvider.models.PSObject.Properties[$LocalModel]) {
-            $modelDefinition = [pscustomobject]@{
-                name = $LocalModel
-            }
-
             Set-JsonProperty `
                 -Object $ollamaProvider.models `
                 -Name $LocalModel `
-                -Value $modelDefinition
+                -Value ([pscustomobject]@{
+                    name = $LocalModel
+                })
         }
 
-        # Check availability before starting any download.
         Write-Host ''
         Write-Host "Checking Ollama model: $LocalModel"
 
@@ -271,9 +380,6 @@ try {
                 -Question "Download $LocalModel now?")) {
                 throw "Required Ollama model is missing: $LocalModel"
             }
-
-            Write-Host ''
-            Write-Host "Downloading $LocalModel..."
 
             & ollama pull $LocalModel
 
@@ -292,7 +398,6 @@ try {
 
     $newJson = $config | ConvertTo-Json -Depth 30
 
-    # Avoid modifying the file when the effective config matches.
     $unchanged = $false
 
     if ($existingFile) {
@@ -305,10 +410,21 @@ try {
         $unchanged = ($before -ceq $after)
     }
 
-    # Prepare a temporary configuration for OpenCode validation.
     if (-not (Test-Path -LiteralPath $InstallPath)) {
         New-Item -ItemType Directory `
             -Path $InstallPath -Force | Out-Null
+    }
+
+    # OpenCode needs the instructions file during validation.
+    $createdInstructions = $false
+
+    if (-not (Test-Path -LiteralPath $instructionsPath)) {
+        Copy-Item `
+            -LiteralPath $instructionsSource `
+            -Destination $instructionsPath `
+            -ErrorAction Stop
+
+        $createdInstructions = $true
     }
 
     $temporaryPath = Join-Path $InstallPath (
@@ -323,7 +439,6 @@ try {
         $utf8
     )
 
-    # Validate using OpenCode before changing the saved config.
     $previousConfig = $env:OPENCODE_CONFIG
 
     try {
@@ -333,22 +448,33 @@ try {
         Write-Host 'Verifying OpenCode configuration...'
 
         $modelOutput = @(& opencode models 2>&1)
-        $modelExit = $LASTEXITCODE
 
-        if ($modelExit -ne 0) {
-            throw "OpenCode rejected the configuration (exit $modelExit)."
+        if ($LASTEXITCODE -ne 0) {
+            throw 'OpenCode rejected the model configuration.'
         }
 
         if ($Local) {
-            $expectedModel = "ollama/$LocalModel"
-
             $modelLines = @(
                 $modelOutput |
                     ForEach-Object { $_.ToString().Trim() }
             )
 
-            if ($modelLines -notcontains $expectedModel) {
-                throw "OpenCode did not list: $expectedModel"
+            if ($modelLines -notcontains "ollama/$LocalModel") {
+                throw "OpenCode did not list ollama/$LocalModel"
+            }
+        }
+
+        $agentOutput = @(& opencode agent list 2>&1)
+
+        if ($LASTEXITCODE -ne 0) {
+            throw 'OpenCode could not list the configured agents.'
+        }
+
+        $agentText = $agentOutput | Out-String
+
+        foreach ($name in @('ps-read', 'ps-write')) {
+            if ($agentText -notmatch [regex]::Escape($name)) {
+                throw "OpenCode did not list agent: $name"
             }
         }
     }
@@ -356,7 +482,6 @@ try {
         $env:OPENCODE_CONFIG = $previousConfig
     }
 
-    # Write only after validation has succeeded.
     if ($unchanged) {
         Write-Host 'Existing OpenCode configuration is unchanged.'
     }
@@ -372,7 +497,6 @@ try {
             Write-Host "Backup created: $backupPath"
         }
 
-        # The validated file becomes the saved configuration.
         Move-Item `
             -LiteralPath $temporaryPath `
             -Destination $configPath `
@@ -390,16 +514,9 @@ try {
         -ForegroundColor Green
 
     Write-Host "Configuration: $configPath"
-
-    if ($Cloud) {
-        Write-Host "Cloud model: $CloudModel"
-    }
-
-    if ($Local) {
-        Write-Host "Local model: ollama/$LocalModel"
-    }
-
-    Write-Host 'Global OpenCode configuration was not changed.'
+    Write-Host "Instructions:  $instructionsPath"
+    Write-Host 'Agents:        ps-read, ps-write'
+    Write-Host 'Shell:         powershell.exe'
 
     exit 0
 }
