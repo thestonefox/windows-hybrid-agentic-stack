@@ -5,13 +5,14 @@
     Manage Windows Hybrid Agentic Stack configuration.
 
 .DESCRIPTION
-    Load defaults.json and optionally merge config.json.
+    Load config/defaults.json and optionally merge
+    config/config.json.
 
     -Show      Display the effective configuration.
     -Validate  Validate without changing files.
-    -Init      Create an optional config.json from the defaults.
+    -Init      Create config/config.json from the defaults.
 
-    No config.json is required.
+    No config/config.json is required.
 
 .EXAMPLE
     .\scripts\config.ps1 -Show
@@ -40,10 +41,11 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$defaultsPath = Join-Path $repoRoot 'config\defaults.json'
+$configDirectory = Join-Path $repoRoot 'config'
+$defaultsPath = Join-Path $configDirectory 'defaults.json'
 
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
-    $ConfigPath = Join-Path $repoRoot 'config.json'
+    $ConfigPath = Join-Path $configDirectory 'config.json'
 }
 
 function Merge-Configuration {
@@ -237,7 +239,12 @@ try {
             -ForegroundColor Green
 
         if (-not (Test-Path -LiteralPath $ConfigPath)) {
-            Write-Host 'Using built-in defaults (no config.json).'
+            Write-Host (
+                'Using built-in defaults (no config/config.json).'
+            )
+        }
+        else {
+            Write-Host "Using user configuration: $ConfigPath"
         }
     }
     elseif ($Init) {

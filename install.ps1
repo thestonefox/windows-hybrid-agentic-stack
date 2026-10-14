@@ -5,19 +5,23 @@
     Windows Hybrid Agentic Stack installer.
 
 .DESCRIPTION
-    Loads configuration, selects components, and checks prerequisites.
+    Loads effective configuration, selects components,
+    checks prerequisites and configures OpenCode agents.
 
-    Component installation is not yet implemented. This entry point
-    currently performs preflight checks only.
+    External prerequisites must already be installed.
+    Chatterbox installation is not yet implemented.
 
 .EXAMPLE
     .\install.ps1
 
 .EXAMPLE
+    .\install.ps1 -Cloud
+
+.EXAMPLE
     .\install.ps1 -Cloud -Local
 
 .EXAMPLE
-    .\install.ps1 -Voice -InstallPath 'D:\AI\AgentStack'
+    .\install.ps1 -Local -InstallPath 'D:\AI\AgentStack'
 #>
 
 [CmdletBinding()]
@@ -32,8 +36,10 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = $PSScriptRoot
+
 $configScript = Join-Path $repoRoot 'scripts\config.ps1'
 $prerequisiteScript = Join-Path $repoRoot 'scripts\check-prerequisites.ps1'
+$agentSetupScript = Join-Path $repoRoot 'scripts\setup-agents.ps1'
 
 function Read-YesNo {
     param(
@@ -56,7 +62,8 @@ function Read-YesNo {
             'n'   { return $false }
             'no'  { return $false }
             default {
-                Write-Host 'Please enter Y or N.' -ForegroundColor Yellow
+                Write-Host 'Please enter Y or N.' `
+                    -ForegroundColor Yellow
             }
         }
     }
@@ -68,20 +75,25 @@ try {
     Write-Host '============================'
     Write-Host ''
 
-    foreach ($file in @($configScript, $prerequisiteScript)) {
+    # Check required project scripts.
+    foreach ($file in @(
+        $configScript,
+        $prerequisiteScript,
+        $agentSetupScript
+    )) {
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
-            throw "Required script not found: $file"
+            throw "Required project script missing: $file"
         }
     }
 
-    # Validate configuration before using it.
+    # Validate the effective configuration.
     & $configScript -Validate
 
     if ($LASTEXITCODE -ne 0) {
         throw 'Configuration validation failed.'
     }
 
-    # Obtain the effective configuration from the existing loader.
+    # Load defaults combined with optional user overrides.
     $configJson = & $configScript -Show
 
     if ($LASTEXITCODE -ne 0) {
@@ -90,12 +102,16 @@ try {
 
     $config = ($configJson | Out-String) | ConvertFrom-Json
 
-    # Explicit component switches override interactive selection.
+    if ($null -eq $config) {
+        throw 'Configuration could not be parsed.'
+    }
+
+    # Explicit switches select only the specified components.
     $explicitSelection = $Cloud -or $Local -or $Voice
 
     if (-not $explicitSelection) {
         Write-Host ''
-        Write-Host 'Select the components to install:'
+        Write-Host 'Select components to install:'
         Write-Host ''
 
         $Cloud = Read-YesNo `
@@ -115,7 +131,7 @@ try {
         throw 'No components selected.'
     }
 
-    # Resolve installation directory.
+    # Resolve installation path.
     if ([string]::IsNullOrWhiteSpace($InstallPath)) {
         $InstallPath = $config.installation.directory
     }
@@ -124,25 +140,43 @@ try {
         $InstallPath = Join-Path $HOME 'AI\WindowsHybridAgenticStack'
     }
 
-    $InstallPath = [Environment]::ExpandEnvironmentVariables($InstallPath)
-    $InstallPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+    $InstallPath = [Environment]::ExpandEnvironmentVariables(
         $InstallPath
     )
 
+    $InstallPath = $ExecutionContext.SessionState.Path.
+        GetUnresolvedProviderPathFromPSPath($InstallPath)
+
+    # Display installation plan.
     Write-Host ''
     Write-Host 'Installation plan'
     Write-Host '-----------------'
+
     Write-Host "Directory:    $InstallPath"
     Write-Host "Cloud agents: $Cloud"
     Write-Host "Local agents: $Local"
     Write-Host "Voice output: $Voice"
+
+    if ($Cloud) {
+        Write-Host "Cloud model:  $($config.agents.cloud.model)"
+    }
+
+    if ($Local) {
+        Write-Host "Local model:  $($config.agents.local.model)"
+    }
+
+    if ($Voice) {
+        Write-Host "TTS engine:   $($config.tts.engine)"
+    }
+
     Write-Host ''
 
-    if (-not (Read-YesNo -Question 'Continue with prerequisite checks?')) {
-        Write-Host 'Cancelled. No changes made.'
+    if (-not (Read-YesNo -Question 'Continue with installation?')) {
+        Write-Host 'Installation cancelled. No changes made.'
         exit 0
     }
 
+    # Prerequisite checks.
     Write-Host ''
     Write-Host 'Checking prerequisites...'
     Write-Host ''
@@ -157,21 +191,71 @@ try {
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host ''
-        Write-Host 'Required prerequisites are missing.' -ForegroundColor Red
-        Write-Host 'Install the missing software using the README.'
+        Write-Host 'Required prerequisites are missing.' `
+            -ForegroundColor Red
+
+        Write-Host 'Follow the installation guide in README.md.'
         Write-Host 'Then rerun this installer.'
+
         exit 1
     }
 
     Write-Host ''
-    Write-Host 'Prerequisite checks completed.' -ForegroundColor Green
+    Write-Host 'Prerequisite checks completed.' `
+        -ForegroundColor Green
+
+    # Configure OpenCode for selected agent types.
+    if ($Cloud -or $Local) {
+        Write-Host ''
+        Write-Host 'Configuring OpenCode agents...'
+        Write-Host ''
+
+        $setupArguments = @{
+            Cloud = [bool]$Cloud
+            Local = [bool]$Local
+            InstallPath = $InstallPath
+            CloudModel = [string]$config.agents.cloud.model
+            LocalModel = [string]$config.agents.local.model
+        }
+
+        & $agentSetupScript @setupArguments
+
+        if ($LASTEXITCODE -ne 0) {
+            throw 'OpenCode agent setup failed.'
+        }
+    }
+
+    # TTS setup will be integrated in a later commit.
+    if ($Voice) {
+        Write-Host ''
+        Write-Host 'Chatterbox installation is not implemented yet.' `
+            -ForegroundColor Yellow
+    }
+
     Write-Host ''
-    Write-Host 'Component installation is not implemented yet.'
-    Write-Host 'No files or system settings have been changed.'
+    Write-Host 'Installation stage completed.' `
+        -ForegroundColor Green
+
+    if ($Cloud -or $Local) {
+        $openCodeConfig = Join-Path $InstallPath 'opencode.json'
+
+        Write-Host ''
+        Write-Host "OpenCode configuration: $openCodeConfig"
+        Write-Host ''
+        Write-Host 'To use this configuration in the current session:'
+        Write-Host "`$env:OPENCODE_CONFIG = '$openCodeConfig'"
+    }
+
+    Write-Host ''
+    Write-Host 'PowerShell agent commands are not yet installed.'
+    Write-Host 'TTS installation will be added in a later stage.'
+
     exit 0
 }
 catch {
     Write-Host ''
-    Write-Host "Installer error: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Installer error: $($_.Exception.Message)" `
+        -ForegroundColor Red
+
     exit 1
 }

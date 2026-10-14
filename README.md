@@ -4,7 +4,7 @@ A configurable Windows AI agent toolkit combining local language models, cloud A
 
 The goal is to provide a straightforward way to set up a hybrid AI environment on Windows, with PowerShell commands for interacting with local and cloud models and optional spoken responses.
 
-> **Development status:** This project is under active development. Prerequisite detection, configuration management, and the installer preflight workflow are implemented. Automated component installation and agent/TTS integration are still being developed.
+> **Development status:** This project is under active development. Prerequisite detection, configuration management, and OpenCode/Ollama agent configuration are implemented. PowerShell agent commands, Chatterbox installation, and TTS integration are still being developed.
 
 ## Features
 
@@ -17,8 +17,8 @@ The project is designed around four main components:
 
 ### Planned capabilities
 
-- Independent installation of cloud agents, local agents, and TTS.
-- Configurable model selection and TTS behaviour.
+- Independent setup of cloud and local agents; optional TTS installation is planned.
+- Configurable agent model selection; TTS configuration is implemented but not yet applied to a service.
 - PowerShell commands for AI agents and spoken responses.
 - Automatic startup and idle shutdown of the TTS service.
 - Runtime configuration changes where supported.
@@ -40,7 +40,7 @@ Depending on the components you choose, you will need:
 
 You do not need to install every component. For example, cloud-only agents do not require Python or Ollama.
 
-The installer will manage the project's own dependencies, including Python virtual environments, PyTorch, Chatterbox packages, and service configuration.
+A future installer stage will manage TTS dependencies, including a Python virtual environment, PyTorch, Chatterbox packages, and service configuration. The current installer configures OpenCode and can download Ollama models.
 
 **External applications such as Python, Ollama, and OpenCode must be installed by the user before running the project installer.**
 
@@ -92,7 +92,7 @@ You can list Python installations using:
 py -0p
 ```
 
-There is no need to install Chatterbox, PyTorch, or CUDA-enabled Python packages manually. The project installer will handle those dependencies in an isolated virtual environment.
+Chatterbox and PyTorch installation is not yet implemented in this project. Their dependencies will be managed in an isolated virtual environment in a later stage.
 
 ### 3. Install OpenCode (cloud or local agents)
 
@@ -146,7 +146,7 @@ For example, you can download and run Qwen3 8B using:
 ollama run qwen3:8b
 ```
 
-Qwen3 8B is an example model, not a mandatory dependency. Model selection will be configurable.
+Qwen3 8B is the built-in default model, not a mandatory choice. You can select a different model in `config/config.json`. The installer checks for the selected model and offers to download it if missing.
 
 You can skip Ollama if you only intend to use cloud agents.
 
@@ -164,7 +164,7 @@ opencode
 
 Follow OpenCode's provider connection and authentication instructions.
 
-Model selection will eventually be managed through this project's configuration.
+Model selection is managed through this project's configuration. The installer creates a stack-specific OpenCode configuration; authentication and actual cloud model access must still be set up and verified separately.
 
 Cloud AI may incur usage charges depending on your provider and authentication method.
 
@@ -184,7 +184,7 @@ nvidia-smi
 
 If the command succeeds, it should display the GPU model, driver version, and memory information.
 
-A separately installed CUDA Toolkit is not necessarily required. The project installer will manage the appropriate CUDA-enabled PyTorch packages where supported.
+A separately installed CUDA Toolkit is not necessarily required. A later installer stage is intended to manage appropriate CUDA-enabled PyTorch packages where supported.
 
 NVIDIA acceleration is optional in the prerequisite checker. CPU-based TTS compatibility and performance are not yet verified.
 
@@ -231,12 +231,12 @@ A successful prerequisite check does not guarantee that every software version o
 
 ## Configuration
 
-Configuration uses built-in defaults, so **no `config.json` file is required**.
+Configuration uses built-in defaults, so **no `config/config.json` file is required**.
 
 The project loads settings from:
 
 1. `config/defaults.json` — Built-in application defaults.
-2. `config.json` — Optional user-defined overrides.
+2. `config/config.json` — Optional user-defined overrides.
 
 User configuration files only need to contain the settings you want to change. Everything else inherits its default value.
 
@@ -245,10 +245,10 @@ User configuration files only need to contain the settings you want to change. E
 Copy the provided example:
 
 ```powershell
-Copy-Item .\config\config.json.example .\config.json
+Copy-Item .\config\config.json.example .\config\config.json
 ```
 
-Then edit `config.json` as needed.
+Then edit `config/config.json` as needed.
 
 For example, to change the TTS idle timeout:
 
@@ -284,9 +284,9 @@ You can also generate a complete configuration from the built-in defaults:
 
 The configuration system supports partial overrides, validates values, and rejects unknown settings.
 
-User-specific `config.json` files are excluded from Git.
+The user-specific `config/config.json` file is excluded from Git.
 
-**Note:** Configuration loading and validation are implemented. The installer, agent commands, and TTS service do not yet consume these settings.
+**Note:** The installer uses configuration settings for selected components, installation directory, and agent models. TTS settings are validated but are not yet applied to a service.
 
 ## PowerShell execution policy
 
@@ -312,7 +312,7 @@ See [Troubleshooting](docs/troubleshooting.md) for additional information.
 
 ## Installation
 
-> **Development status:** The installer currently supports component selection, configuration loading, and prerequisite checks. Actual installation of AI agents and text-to-speech is not yet implemented.
+> **Development status:** The installer configures cloud and local OpenCode agents, can download selected Ollama models, and supports incremental setup. PowerShell agent commands and Chatterbox installation are not yet implemented.
 
 Before running the installer, follow the [prerequisite installation instructions](#installing-prerequisites) for your chosen components.
 
@@ -351,15 +351,38 @@ If no installation directory is provided, the installer uses the configured dire
 
 The installer currently:
 
-- Loads built-in defaults and optional user configuration.
+- Loads `config/defaults.json` and optional `config/config.json` overrides.
 - Allows interactive or command-line component selection.
-- Resolves the installation directory.
-- Checks prerequisites for selected components.
-- Reports missing dependencies and exits without modifying the system.
+- Resolves the installation directory and checks selected prerequisites.
+- Stops when required prerequisites are missing, before configuring agents.
+- Creates a stack-specific `opencode.json` for the chosen agent models.
+- Checks for the selected Ollama model and asks before downloading it.
+- Adds cloud or local agents to an existing stack configuration, preserving the other component and unrelated settings.
+- Verifies that OpenCode lists the configured local model before saving changes.
+- Backs up an existing OpenCode configuration when an update is needed; repeat runs leave unchanged configurations alone.
 
-**The installer does not yet install or configure OpenCode, Ollama models, Chatterbox, or PowerShell agent commands.**
+OpenCode and Ollama must already be installed as external prerequisites. The installer **does not** install those applications, authenticate OpenAI, verify cloud inference, install PowerShell agent commands, or install Chatterbox TTS.
 
-These features will be added as development progresses.
+### Using the stack-specific OpenCode configuration
+
+The installer saves its OpenCode configuration at `opencode.json` inside the chosen installation directory. By default, this is:
+
+```text
+%USERPROFILE%\AI\WindowsHybridAgenticStack\opencode.json
+```
+
+To use it in the current PowerShell session:
+
+```powershell
+$env:OPENCODE_CONFIG = Join-Path $HOME 'AI\WindowsHybridAgenticStack\opencode.json'
+opencode models
+```
+
+If you used `-InstallPath`, use the `opencode.json` in that directory instead.
+
+This keeps the stack configuration separate from the user's global OpenCode configuration. The setting applies only to the current PowerShell session; the future agent commands will handle selecting the appropriate configuration automatically.
+
+`opencode models` confirms that OpenCode can load and list configured models. It does **not** guarantee successful inference or OpenAI authentication. Local inference also requires the Ollama service to be running.
 
 If PowerShell blocks the installer, see [PowerShell execution policy](#powershell-execution-policy).
 

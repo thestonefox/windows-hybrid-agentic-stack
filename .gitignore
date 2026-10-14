@@ -22,7 +22,7 @@ venv/
 *.log
 
 # User-specific settings
-config.json
+/config/config.json
 .env
 .env.*
 
@@ -31,3 +31,17 @@ config.json
 .idea/
 .DS_Store
 Thumbs.db
+
+# Private local attachments, voice data and test evidence
+/.codex-remote-attachments/
+/voices/
+/WHAS-TestEvidence/
+/WHAS-UninstallReceipts/
+/test-results/
+/audit-results/
+/auth.json
+/credentials.json
+*.pem
+*.key
+*.pfx
+*.p12
