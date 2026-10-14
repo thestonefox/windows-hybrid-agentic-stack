@@ -23,7 +23,9 @@ param(
     [string]$InstallPath,
 
     [string]$CloudModel = 'openai/gpt-6-luna',
-    [string]$LocalModel = 'qwen3:8b'
+    [string]$LocalModel = 'qwen3:8b',
+    [ValidateRange(4096, 131072)]
+    [int]$LocalContextSize = 16384
 )
 
 $ErrorActionPreference = 'Stop'
@@ -141,6 +143,74 @@ Review the existing OpenCode configuration.
     }
 }
 
+function Get-ManagedOllamaName {
+    param([string]$Name, [int]$ContextSize)
+
+    # Keep the original Ollama model unchanged. Use a stable model name.
+    $safeName = ($Name.ToLowerInvariant() -replace '[^a-z0-9-]', '-')
+    $safeName = $safeName.Trim('-')
+    if (-not $safeName) { throw 'Invalid local model name.' }
+    return "whas-$safeName-ctx$ContextSize"
+}
+
+function Get-OllamaModelParameters {
+    param([string]$Name)
+    $body = @{ model = $Name } | ConvertTo-Json -Compress
+    try {
+        $detail = Invoke-RestMethod -Method Post `
+            -Uri 'http://127.0.0.1:11434/api/show' `
+            -ContentType 'application/json' -Body $body -TimeoutSec 30
+    }
+    catch {
+        throw "Unable to inspect Ollama model '$Name': $($_.Exception.Message)"
+    }
+    return [string]$detail.parameters
+}
+
+function Ensure-ContextModel {
+    param([string]$SourceModel, [int]$ContextSize)
+
+    $managedName = Get-ManagedOllamaName -Name $SourceModel `
+        -ContextSize $ContextSize
+
+    if (Test-OllamaModel -Name $managedName) {
+        $parameters = Get-OllamaModelParameters -Name $managedName
+        $expression = '(?m)^\s*num_ctx\s+' + $ContextSize + '\s*$'
+        if ($parameters -notmatch $expression) {
+            throw "Existing Ollama model '$managedName' has different parameters. Refusing to overwrite it."
+        }
+        Write-Host "Configured Ollama model already exists: $managedName"
+        return $managedName
+    }
+
+    $modelfile = Join-Path ([System.IO.Path]::GetTempPath()) `
+        ('whas-' + [guid]::NewGuid().ToString('N') + '.Modelfile')
+    try {
+        $modelfileText = "FROM $SourceModel`nPARAMETER num_ctx $ContextSize`n"
+        [System.IO.File]::WriteAllText(
+            $modelfile, $modelfileText,
+            (New-Object System.Text.UTF8Encoding($false))
+        )
+        Write-Host "Creating context-enabled Ollama model: $managedName"
+        & ollama create $managedName -f $modelfile
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create Ollama model: $managedName"
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $modelfile -Force `
+            -ErrorAction SilentlyContinue
+    }
+    if (-not (Test-OllamaModel -Name $managedName)) {
+        throw "Generated Ollama model not found: $managedName"
+    }
+    $parameters = Get-OllamaModelParameters -Name $managedName
+    if ($parameters -notmatch ('(?m)^\s*num_ctx\s+' + $ContextSize + '\s*$')) {
+        throw "Ollama did not apply context $ContextSize to $managedName"
+    }
+    return $managedName
+}
+
 $temporaryPath = $null
 
 try {
@@ -194,23 +264,48 @@ try {
         Write-Host 'Creating new OpenCode configuration.'
     }
 
-    # Refuse to overwrite different existing instructions.
+    # Upgrade managed instructions without overwriting user additions.
+    $requiredInstructions = Get-Content `
+        -LiteralPath $instructionsSource -Raw
+    $instructionsChanged = $false
+    $instructionsToWrite = $requiredInstructions
+    $managedHeading = '## Windows command execution'
+    $markerIndex = $requiredInstructions.IndexOf($managedHeading)
+    if ($markerIndex -lt 0) {
+        throw 'Instruction migration marker missing from source.'
+    }
+    $managedSection = $requiredInstructions.Substring($markerIndex).Trim()
+
     if (Test-Path -LiteralPath $instructionsPath) {
         if (-not (Test-Path -LiteralPath $instructionsPath -PathType Leaf)) {
             throw "Instructions path is not a file: $instructionsPath"
         }
-
         $existingInstructions = Get-Content `
             -LiteralPath $instructionsPath -Raw
 
-        $requiredInstructions = Get-Content `
-            -LiteralPath $instructionsSource -Raw
-
-        if ($existingInstructions -cne $requiredInstructions) {
-            throw @"
-Existing instructions differ: $instructionsPath
-No instructions were overwritten.
-"@
+        # Compare without depending on CRLF/LF or trailing newlines.
+        $existingNormal = ($existingInstructions -replace "`r`n", "`n").Trim()
+        $requiredNormal = ($requiredInstructions -replace "`r`n", "`n").Trim()
+        if ($existingNormal -cne $requiredNormal) {
+            if ($existingInstructions.Contains($managedHeading)) {
+                # The managed section exists already. Preserve user changes
+                # rather than overwriting an unknown version.
+                $sectionStart = $existingInstructions.IndexOf($managedHeading)
+                $actualSection = ($existingInstructions.Substring($sectionStart) `
+                    -replace "`r`n", "`n").Trim()
+                $expectedSection = ($managedSection -replace "`r`n", "`n").Trim()
+                if ($actualSection -cne $expectedSection) {
+                    throw "Existing managed instruction section differs: $instructionsPath"
+                }
+                $instructionsToWrite = $existingInstructions
+            }
+            else {
+                # Previously installed instructions or user extensions:
+                # preserve every existing line, append only our new guidance.
+                $instructionsToWrite = $existingInstructions.TrimEnd() + `
+                    "`r`n`r`n" + $managedSection + "`r`n"
+                $instructionsChanged = $true
+            }
         }
     }
 
@@ -306,6 +401,27 @@ No instructions were overwritten.
         }
     }
 
+    # Ensure the source model exists before deriving a context variant.
+    $configuredLocalModel = $LocalModel
+    if ($Local) {
+        if (($LocalContextSize % 1024) -ne 0) {
+            throw 'LocalContextSize must be a multiple of 1024.'
+        }
+        Write-Host "Checking Ollama source model: $LocalModel"
+        if (-not (Test-OllamaModel -Name $LocalModel)) {
+            if (-not (Confirm-Action -Question "Download $LocalModel now?")) {
+                throw "Required Ollama model is missing: $LocalModel"
+            }
+            & ollama pull $LocalModel
+            if ($LASTEXITCODE -ne 0 -or
+                -not (Test-OllamaModel -Name $LocalModel)) {
+                throw "Ollama model download failed: $LocalModel"
+            }
+        }
+        $configuredLocalModel = Ensure-ContextModel `
+            -SourceModel $LocalModel -ContextSize $LocalContextSize
+    }
+
     # Select the default model.
     if ($Cloud) {
         Set-JsonProperty `
@@ -323,7 +439,7 @@ No instructions were overwritten.
             Set-JsonProperty `
                 -Object $config `
                 -Name 'model' `
-                -Value "ollama/$LocalModel"
+                -Value "ollama/$configuredLocalModel"
         }
     }
 
@@ -361,38 +477,16 @@ No instructions were overwritten.
             Assert-OllamaProvider -Provider $ollamaProvider
         }
 
-        if ($null -eq $ollamaProvider.models.PSObject.Properties[$LocalModel]) {
+        if ($null -eq $ollamaProvider.models.PSObject.Properties[$configuredLocalModel]) {
             Set-JsonProperty `
                 -Object $ollamaProvider.models `
-                -Name $LocalModel `
+                -Name $configuredLocalModel `
                 -Value ([pscustomobject]@{
-                    name = $LocalModel
+                    name = $configuredLocalModel
                 })
         }
 
-        Write-Host ''
-        Write-Host "Checking Ollama model: $LocalModel"
-
-        if (-not (Test-OllamaModel -Name $LocalModel)) {
-            Write-Host "Model not installed: $LocalModel"
-
-            if (-not (Confirm-Action `
-                -Question "Download $LocalModel now?")) {
-                throw "Required Ollama model is missing: $LocalModel"
-            }
-
-            & ollama pull $LocalModel
-
-            if ($LASTEXITCODE -ne 0) {
-                throw "Ollama download failed: $LocalModel"
-            }
-
-            if (-not (Test-OllamaModel -Name $LocalModel)) {
-                throw "Ollama model verification failed: $LocalModel"
-            }
-        }
-
-        Write-Host "Ollama model available: $LocalModel" `
+        Write-Host "Ollama context model available: $configuredLocalModel" `
             -ForegroundColor Green
     }
 
@@ -459,7 +553,7 @@ No instructions were overwritten.
                     ForEach-Object { $_.ToString().Trim() }
             )
 
-            if ($modelLines -notcontains "ollama/$LocalModel") {
+            if ($modelLines -notcontains "ollama/$configuredLocalModel") {
                 throw "OpenCode did not list ollama/$LocalModel"
             }
         }
@@ -480,6 +574,17 @@ No instructions were overwritten.
     }
     finally {
         $env:OPENCODE_CONFIG = $previousConfig
+    }
+
+    if ($instructionsChanged) {
+        $instructionsBackup = "$instructionsPath.bak.$([guid]::NewGuid().ToString('N'))"
+        Copy-Item -LiteralPath $instructionsPath `
+            -Destination $instructionsBackup -ErrorAction Stop
+        [System.IO.File]::WriteAllText(
+            $instructionsPath, $instructionsToWrite,
+            (New-Object System.Text.UTF8Encoding($false))
+        )
+        Write-Host "Updated Windows agent instructions: $instructionsPath"
     }
 
     if ($unchanged) {

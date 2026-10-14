@@ -338,6 +338,7 @@ try {
 
     if ($Local) {
         Write-Host "Local model:  $($config.agents.local.model)"
+        Write-Host "Context:      $($config.agents.local.contextSize) tokens"
     }
 
     if ($Voice) {
@@ -388,6 +389,7 @@ try {
             InstallPath = $InstallPath
             CloudModel = [string]$config.agents.cloud.model
             LocalModel = [string]$config.agents.local.model
+            LocalContextSize = [int]$config.agents.local.contextSize
         }
 
         & $agentSetupScript @setupArguments
@@ -405,6 +407,7 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw 'PowerShell agent command installation failed.'
         }
+
     }
 
     if ($Voice) {
@@ -433,6 +436,53 @@ try {
         Install-TtsProfileLoader -Root $InstallPath
     }
 
+        # Runtime agent commands read the installed configuration.
+        # Keep the source model in the repository configuration but
+        # select the generated context-enabled model at runtime.
+        if ($Local) {
+            $modelName = [string]$config.agents.local.model
+            $contextSize = [int]$config.agents.local.contextSize
+            $safeModelName = ($modelName.ToLowerInvariant() -replace '[^a-z0-9-]', '-').Trim('-')
+            $runtimeModel = "whas-$safeModelName-ctx$contextSize"
+            $runtimeConfigPath = Join-Path $InstallPath 'config\config.json'
+            $runtimeConfigDirectory = Split-Path -Parent $runtimeConfigPath
+            if (-not (Test-Path -LiteralPath $runtimeConfigDirectory)) {
+                New-Item -ItemType Directory -Path $runtimeConfigDirectory -Force | Out-Null
+            }
+            $runtimeConfig = if (Test-Path -LiteralPath $runtimeConfigPath -PathType Leaf) {
+                Get-Content -LiteralPath $runtimeConfigPath -Raw | ConvertFrom-Json
+            }
+            else { [pscustomobject]@{} }
+            if ($runtimeConfig -isnot [pscustomobject]) {
+                throw 'Installed runtime configuration is not a JSON object.'
+            }
+            if ($null -eq $runtimeConfig.PSObject.Properties['agents']) {
+                $runtimeConfig | Add-Member -NotePropertyName agents -NotePropertyValue ([pscustomobject]@{})
+            }
+            if ($null -eq $runtimeConfig.agents.PSObject.Properties['local']) {
+                $runtimeConfig.agents | Add-Member -NotePropertyName local -NotePropertyValue ([pscustomobject]@{})
+            }
+            if ($null -eq $runtimeConfig.agents.local.PSObject.Properties['model']) {
+                $runtimeConfig.agents.local | Add-Member -NotePropertyName model -NotePropertyValue $runtimeModel
+            }
+            else { $runtimeConfig.agents.local.model = $runtimeModel }
+            $runtimeJson = $runtimeConfig | ConvertTo-Json -Depth 50
+            $runtimeOriginal = if (Test-Path -LiteralPath $runtimeConfigPath -PathType Leaf) {
+                Get-Content -LiteralPath $runtimeConfigPath -Raw
+            }
+            else { '' }
+            if ($runtimeOriginal.Trim() -cne $runtimeJson.Trim()) {
+                if (Test-Path -LiteralPath $runtimeConfigPath -PathType Leaf) {
+                    $runtimeBackup = "$runtimeConfigPath.bak.$([guid]::NewGuid().ToString('N'))"
+                    Copy-Item -LiteralPath $runtimeConfigPath -Destination $runtimeBackup
+                }
+                [System.IO.File]::WriteAllText(
+                    $runtimeConfigPath, $runtimeJson,
+                    (New-Object System.Text.UTF8Encoding($false))
+                )
+            }
+            Write-Host "Runtime local model: $runtimeModel"
+        }
     Write-Host ''
     Write-Host 'Installation completed.' -ForegroundColor Green
 

@@ -48,3 +48,20 @@ For common system operations, prefer:
 - Prefer directly useful information over lengthy explanations.
 - Distinguish commands actually executed from commands merely suggested.
 - Report failures and limitations clearly.
+
+## Windows command execution
+
+- OpenCode calls its execution tool `bash` even on Windows. Treat this as a
+  tool name, not an instruction to use Bash syntax. Its shell is PowerShell.
+- For system RAM, prefer `(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory`
+  and divide byte counts by `1GB` inside parentheses, for example:
+  `[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 2)`.
+- Use PowerShell syntax for pipeline expressions. Do not append `/ 1MB` to
+  `Select-Object`; perform arithmetic in a PowerShell expression instead.
+- After an execution-tool error, read the error and correct the command.
+  Do not repeat broken commands, invent cmdlets, or change to Linux syntax.
+- For exact file-content requests, write only the specified characters.
+  Never add punctuation, whitespace or commentary inside the file.
+- For modifications, verify results with the available read or execution
+  tools before reporting success. Tool arguments displayed as text do not
+  prove the operation occurred.

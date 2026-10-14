@@ -20,6 +20,7 @@ Components can be installed independently or in combination.
 The project supports:
 
 - Configurable cloud and local agent models.
+- Installer-managed Ollama context windows (16,384 tokens by default).
 - Four PowerShell agent commands.
 - Read-only and write-capable agent modes.
 - Optional spoken agent responses.
@@ -164,7 +165,7 @@ To download the default model manually:
 ollama pull qwen3:8b
 ```
 
-You can configure another model in `config/config.json`.
+You can configure another model in `config/config.json`. During local-agent installation, the installer creates a separate context-enabled variant of the selected Ollama model instead of modifying the source model. See [Local Ollama context size](#local-ollama-context-size).
 
 ### 6. Configure OpenAI authentication (cloud agents only)
 
@@ -277,7 +278,8 @@ For example:
 {
   "agents": {
     "local": {
-      "model": "qwen3:8b"
+      "model": "qwen3:8b",
+      "contextSize": 16384
     }
   },
   "tts": {
@@ -293,6 +295,35 @@ For example:
 The configuration loader merges overrides with the built-in defaults.
 
 It validates settings and rejects unsupported or unknown values.
+
+### Local Ollama context size
+
+The local agent uses `agents.local.contextSize`, defaulting to **16384 tokens**. This is a context-window setting, not a guarantee of output length or model accuracy. Valid configuration values range from **4096 to 131072** tokens; larger values can require substantially more memory.
+
+For example, to select the source model and context size in `config/config.json`:
+
+```json
+{
+  "agents": {
+    "local": {
+      "model": "qwen3:8b",
+      "contextSize": 16384
+    }
+  }
+}
+```
+
+When `-Local` is selected, the installer checks for the original Ollama model and creates a **separate managed model** whose Modelfile includes `PARAMETER num_ctx 16384`. For `qwen3:8b`, the generated name is `whas-qwen3-8b-ctx16384`. `localagent` and `localagentdo` use that model automatically; the original `qwen3:8b` remains unchanged.
+
+The generated name is based on the exact configured source model and context size. For example, choosing the already customised source `qwen3-8b-16k` produces `whas-qwen3-8b-16k-ctx16384`. Prefer selecting the original model when no other customisations are needed.
+
+To inspect the generated model:
+
+```powershell
+ollama show whas-qwen3-8b-ctx16384 --modelfile
+```
+
+Look for `PARAMETER num_ctx 16384`. You can also use `ollama list` to see available models. Re-running the installer reuses an existing managed model when its context setting matches; it refuses to overwrite a same-named model with conflicting parameters. Changing the source model or context size requires rerunning `.\install.ps1 -Local` to update the installed agent configuration.
 
 ### Inspect configuration
 
@@ -410,7 +441,9 @@ Depending on the selected components, the installer:
 - Checks the required external prerequisites.
 - Creates a stack-specific OpenCode configuration.
 - Configures the cloud and/or local agent models.
-- Offers to download a missing Ollama model.
+- Offers to download a missing Ollama source model.
+- Creates or reuses a separate Ollama variant with the configured context window.
+- Installs Windows PowerShell 5.1-specific agent instructions without discarding existing instructions.
 - Installs `ps-read` and `ps-write` agent permissions.
 - Registers PowerShell agent commands.
 - Creates an isolated Python 3.11 environment for Chatterbox.
@@ -570,7 +603,9 @@ The command displays the OpenCode events and passes the final answer to Chatterb
 
 Other OpenCode restrictions remain active. For example, an operation outside the working directory may require approval or be rejected.
 
-The supplied agent instructions target Windows PowerShell 5.1 and do not depend on WSL, Git Bash, or PowerShell 7.
+The supplied agent instructions target Windows PowerShell 5.1 and do not depend on WSL, Git Bash, or PowerShell 7. They direct agents to prefer native Windows commands, inspect execution errors, verify results before claiming success, convert memory units correctly, and respect exact file-content requests.
+
+These instructions improve reliability but do not guarantee that smaller local models will always choose correct commands or obey every request. Read-only protection is enforced through OpenCode agent permissions as well as being described in the instructions.
 
 ### OpenCode configuration isolation
 
@@ -679,108 +714,7 @@ The built-in `default` voice is reserved and cannot be removed.
 
 ## Troubleshooting
 
-### PyTorch fails to load `c10.dll`
-
-An error such as:
-
-```text
-OSError: [WinError 126] Error loading torch\lib\c10.dll
-```
-
-may indicate that Microsoft Visual C++ Redistributable (x64) is missing.
-
-Install it using:
-
-```powershell
-winget install --id Microsoft.VCRedist.2015+.x64 --exact --source winget
-```
-
-Then reopen PowerShell and retry the installation or import.
-
-### Chatterbox starts, then stops
-
-Inspect the error log:
-
-```powershell
-Get-Content "$HOME\AI\WindowsHybridAgenticStack\tts\service-errors.log" -Tail 80
-```
-
-Inspect normal service output:
-
-```powershell
-Get-Content "$HOME\AI\WindowsHybridAgenticStack\tts\service.log" -Tail 40
-```
-
-These default paths assume the standard installation directory. Adjust them if you configured a custom location.
-
-### Windows error 1455 during model loading
-
-If the error log contains:
-
-```text
-OSError: The paging file is too small for this operation to complete.
-(os error 1455)
-```
-
-Windows does not have enough available committed memory to load the model.
-
-This occurred during testing in a Windows Sandbox instance with 4 GB RAM.
-
-The Python packages installed correctly, but Chatterbox Turbo could not load its model.
-
-Use a machine with sufficient available RAM and virtual memory. CPU inference may also be substantially slower than GPU inference.
-
-### TTS commands are not recognised
-
-Open a new Windows PowerShell window after installation.
-
-Check the command registration:
-
-```powershell
-Get-Command tts-start,tts-stop,tts-status,tts-say
-```
-
-If commands are missing, check the current PowerShell profile and execution policy:
-
-```powershell
-Get-Content $PROFILE.CurrentUserCurrentHost
-```
-
-```powershell
-Get-ExecutionPolicy -List
-```
-
-### CUDA is unavailable
-
-Check your NVIDIA GPU:
-
-```powershell
-nvidia-smi
-```
-
-Check CUDA availability using the installed Python environment:
-
-```powershell
-& "$HOME\AI\WindowsHybridAgenticStack\.venv\Scripts\python.exe" -c "import torch; print('CUDA available:', torch.cuda.is_available())"
-```
-
-If CUDA is unavailable, verify your driver and installed PyTorch build.
-
-### OpenCode commands are not recognised
-
-Open a new PowerShell window and check:
-
-```powershell
-Get-Command agent,agentdo,localagent,localagentdo
-```
-
-Check your profile configuration:
-
-```powershell
-Get-Content $PROFILE.CurrentUserCurrentHost
-```
-
-If script execution is blocked, review [PowerShell execution policy](#powershell-execution-policy).
+See [Troubleshooting](troubleshooting.md) for installation, PowerShell, Ollama, OpenCode and Chatterbox issues.
 
 ## Testing status
 
@@ -801,6 +735,12 @@ The project has been tested incrementally using Windows Sandbox.
 | Actual CPU speech generation | Not yet verified |
 | CUDA installation and inference | Not yet verified |
 | Cloud model authentication and inference | Not verified by installer |
+| Managed 16K Ollama model creation and selection | Passed in Windows Sandbox with Qwen3 8B |
+| Local agent executing `Get-Date` | Passed |
+| Local agent reporting total RAM (16 GB Sandbox) | Passed |
+| Exact local-agent file contents | Passed |
+| Local read-only agent refusal and independent file absence | Passed |
+| Local-agent installation repeat run | Passed |
 
 Passing the installation and import checks does not mean speech generation has been fully validated.
 

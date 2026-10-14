@@ -11,7 +11,8 @@
     "local": {
       "enabled": true,
       "provider": "ollama",
-      "model": "qwen3:8b"
+      "model": "qwen3:8b",
+      "contextSize": 16384
     }
   },
   "tts": {

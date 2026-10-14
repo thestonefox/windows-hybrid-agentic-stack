@@ -124,6 +124,18 @@ function Assert-Configuration {
         }
     }
 
+    $contextSize = $Config.agents.local.contextSize
+
+    if ($contextSize -isnot [int] -and $contextSize -isnot [long]) {
+        $errors.Add('agents.local.contextSize must be an integer')
+    }
+    elseif ($contextSize -lt 4096 -or $contextSize -gt 131072) {
+        $errors.Add('agents.local.contextSize must be 4096 to 131072')
+    }
+    elseif (($contextSize % 1024) -ne 0) {
+        $errors.Add('agents.local.contextSize must be a multiple of 1024')
+    }
+
     foreach ($name in @('enabled', 'autoStart')) {
         if ($Config.tts.$name -isnot [bool]) {
             $errors.Add("tts.$name must be a boolean")
