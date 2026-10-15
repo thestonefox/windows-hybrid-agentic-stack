@@ -513,6 +513,30 @@ Older installations without `.whas-installation.json` require reviewed cleanup; 
 
 The uninstaller has passed isolated Windows PowerShell 5.1 tests, mocked installer integration and live cloud-only and local/voice cleanup tests. The cloud cycle passed 20 checks. The local/voice test exposed and fixed open-log hashing, Numba cache recognition and a speech-process exit race; after a successful shutdown-helper retest, the corrected repository uninstaller removed 46,685 files and the test-created model. All 28 post-cleanup checks passed, including exact PATH restoration, clean normal-profile startup, unchanged profiles/policies and original model digests, and preservation of 12 unrelated Python processes. The earlier 90-check rollback below used the supervised procedure. See [test evidence and limitations](docs/install-test-rollback.md#verified-tracked-uninstaller-local-and-voice-test).
 
+### Ownership performance measurements
+
+Ownership hashing now streams bytes directly through SHA-256, uses filesystem path combination after validating relative paths, classifies generated files once per plan and avoids repeatedly copying the growing deletion receipt. Full plan revalidation and the hash check immediately before each file removal remain in place. Ordinary owned files still reject concurrent writers; recognized generated logs support shared reads until speech stops.
+
+On the reference PC in Windows PowerShell 5.1, an isolated fixture of 2,000 files of 4 KiB each plus one 64 MiB binary produced these timings, comparing commit `0418803` with the optimized implementation:
+
+| Operation | Before | After |
+| --- | ---: | ---: |
+| Hash all fixture files | 3.71 s | 0.70 s |
+| Record installation ownership | 3.64 s | 1.23 s |
+| Preview uninstall | 5.08 s | 1.99 s |
+| Apply uninstall | 17.77 s | 7.68 s |
+
+The measured cleanup improvement was about 2.3 times. A larger optimized fixture of 46,641 small files plus one 64 MiB binary also completed: hashing 12.40 s, ownership recording 24.30 s, preview 35.33 s and cleanup 165.76 s. These fixtures measure file-count overhead; they do not reproduce the bytes, disk throughput or running services of a complete CUDA installation. Full cleanup can still take several minutes. The optimized helpers have passed isolated safety and installer integration tests; a new physical-PC installation cycle has not been run for this performance revision.
+
+Reproduce the measurements without installing components, starting services, downloading models or changing persistent PATH:
+
+```powershell
+.\tests\measure-installation-performance.ps1
+.\tests\measure-installation-performance.ps1 -FileCount 46641
+```
+
+Each run creates its own temporary fixture, verifies ownership and cleanup, removes its tracked installation and retains a JSON timing report and receipt. The small fixture is the default. Use `-OutputPath` to choose an absolute JSON destination, or `-SourceRoot` to benchmark helpers from another checkout.
+
 ### Isolated command and installer tests
 
 Run these in Windows PowerShell 5.1 from a context permitted to run test scripts:

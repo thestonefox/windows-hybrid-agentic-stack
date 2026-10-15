@@ -5,7 +5,7 @@ function Resolve-StackOwnedPath {
     param([string]$Root, [string]$Relative)
     if ([string]::IsNullOrWhiteSpace($Relative) -or [IO.Path]::IsPathRooted($Relative) -or
         $Relative -match '(^|[\\/])\.\.?([\\/]|$)|:') { throw "Invalid ownership path: $Relative" }
-    $full = [IO.Path]::GetFullPath((Join-Path $Root $Relative))
+    $full = [IO.Path]::GetFullPath([IO.Path]::Combine($Root, $Relative))
     if (-not $full.StartsWith($Root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Ownership path escapes the installation.'
     }
@@ -82,14 +82,19 @@ function Set-StackRawUserPath {
 
 function Get-StackFileSHA256 {
     param([string]$Path, [switch]$AllowConcurrentWrite)
-    if ($AllowConcurrentWrite) {
-        # Python keeps generated service logs open for writing until shutdown.
-        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    # Stream bytes directly: repeated Get-FileHash/provider setup dominates
+    # small Python files. Ordinary owned files still exclude concurrent writers.
+    if (-not [IO.Path]::IsPathRooted($Path)) {
+        $Path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+    }
+    $sharing = if ($AllowConcurrentWrite) { [IO.FileShare]::ReadWrite } else { [IO.FileShare]::Read }
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $sharing)
+    try {
         $sha = [Security.Cryptography.SHA256]::Create()
         try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','') }
-        finally { $sha.Dispose(); $stream.Dispose() }
+        finally { $sha.Dispose() }
     }
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash
+    finally { $stream.Dispose() }
 }
 
 function Write-StackInstallationState {
@@ -227,7 +232,7 @@ function Complete-StackInstallationTracking {
         if ($relative -eq '.whas-installation.json' -or $relative -like 'voices/*' -or
             ($state.PreexistingVenv -and $relative -like '.venv/*')) { continue }
         if ($relative -in $originals -or @($state.PreexistingPaths) -notcontains $relative) {
-            $files.Add([pscustomobject]@{ Path = $relative; SHA256 = Get-StackFileSHA256 (Join-Path $root $relative) -AllowConcurrentWrite:(Test-StackGeneratedFile $relative $state) })
+            $files.Add([pscustomobject]@{ Path = $relative; SHA256 = Get-StackFileSHA256 ([IO.Path]::Combine($root, $relative)) -AllowConcurrentWrite:(Test-StackGeneratedFile $relative $state) })
         }
     }
     $state.Files = $files.ToArray()

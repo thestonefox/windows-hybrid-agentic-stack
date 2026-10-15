@@ -12,7 +12,8 @@ function Get-StackUninstallPlan {
         DeleteFiles = New-Object 'System.Collections.Generic.List[object]'
         RestoreFiles = New-Object 'System.Collections.Generic.List[object]'
         KeepFiles = New-Object 'System.Collections.Generic.List[string]'
-        RemoveModels = @(); KeepModels = @(); RegistrationBackups = @(); GeneratedDirectories = @()
+        RemoveModels = @(); KeepModels = @(); RegistrationBackups = @()
+        GeneratedDirectories = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         RestoreUserPathExactly = $false
         RestorePreviousRegistration = $false
         ManifestSHA256 = $null; RegistrationSHA256 = $null
@@ -37,6 +38,7 @@ function Get-StackUninstallPlan {
     foreach ($relative in $tree.Files) {
         if ($relative -eq '.whas-installation.json') { continue }
         $path = Resolve-StackOwnedPath $root $relative
+        $generated = Test-StackGeneratedFile $relative $state
         if ($original.ContainsKey($relative)) {
             $hash = Get-StackFileSHA256 $path
             if ($hash -ceq $original[$relative].SHA256) { $plan.KeepFiles.Add($relative) }
@@ -45,14 +47,14 @@ function Get-StackUninstallPlan {
             }
             else { $plan.KeepFiles.Add($relative) }
         }
-        elseif ((Test-StackGeneratedFile $relative $state) -or $owned.ContainsKey($relative)) {
+        elseif ($generated -or $owned.ContainsKey($relative)) {
             # Generated files are rehashed after verified speech shutdown before deletion.
-            $hash = Get-StackFileSHA256 $path -AllowConcurrentWrite:(Test-StackGeneratedFile $relative $state)
-            if ((Test-StackGeneratedFile $relative $state) -or $hash -ceq $owned[$relative].SHA256) {
+            $hash = Get-StackFileSHA256 $path -AllowConcurrentWrite:$generated
+            if ($generated -or $hash -ceq $owned[$relative].SHA256) {
                 $plan.DeleteFiles.Add([pscustomobject]@{ Path = $relative; SHA256 = $hash })
-                if (Test-StackGeneratedFile $relative $state) {
+                if ($generated) {
                     $parent = (Split-Path -Parent $relative).Replace('\','/')
-                    if ($parent -and @($state.PreexistingDirectories) -notcontains $parent) { $plan.GeneratedDirectories += $parent }
+                    if ($parent -and @($state.PreexistingDirectories) -notcontains $parent) { $null = $plan.GeneratedDirectories.Add($parent) }
                 }
             } else { $plan.KeepFiles.Add($relative) }
         }
@@ -179,7 +181,7 @@ function Invoke-StackUninstall {
     if (-not $PSCmdlet.ShouldProcess($Plan.Root, ('Uninstall tracked stack files; remove managed models: ' + $Plan.RemoveManagedModels))) { return }
     $current = Get-StackUninstallPlan -InstallPath $Plan.Root -RemoveManagedModels:$Plan.RemoveManagedModels
     $receipt = [ordered]@{ StartedAtUtc = [DateTime]::UtcNow.ToString('o'); InstallationId = $current.State.InstallationId;
-        InstallPath = $current.Root; DeletedFiles = @(); RestoredFiles = @(); RemovedModels = @(); KeptFiles = $current.KeepFiles;
+        InstallPath = $current.Root; DeletedFiles = [Collections.Generic.List[string]]::new(); RestoredFiles = @(); RemovedModels = @(); KeptFiles = $current.KeepFiles;
         KeptModels = $current.KeepModels; PreviousRegistrationRestored = $false; Completed = $false }
     New-Item -ItemType Directory -Path $receiptRoot -Force -ErrorAction Stop | Out-Null
     $receiptPath = Join-Path $receiptRoot ('uninstall-' + [guid]::NewGuid().ToString('N') + '.json')
@@ -234,7 +236,7 @@ function Invoke-StackUninstall {
             $path = Resolve-StackOwnedPath $current.Root $entry.Path
             if ((Get-StackFileSHA256 $path) -cne $entry.SHA256) { throw "File changed during uninstall: $path" }
             Remove-Item -LiteralPath $path -Force -ErrorAction Stop
-            $receipt.DeletedFiles += $entry.Path
+            $receipt.DeletedFiles.Add($entry.Path)
         }
         foreach ($relative in @(@($current.State.Directories) + @($current.GeneratedDirectories) | Sort-Object -Unique | Sort-Object Length -Descending)) {
             $directory = Resolve-StackOwnedPath $current.Root $relative

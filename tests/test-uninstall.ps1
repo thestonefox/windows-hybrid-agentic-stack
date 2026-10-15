@@ -50,6 +50,20 @@ function Apply-Plan {
     Invoke-StackUninstall -Plan $Plan -PersistPath $false -ReceiptDirectory $receipts -Confirm:$false
 }
 try {
+    [IO.Directory]::CreateDirectory($testRoot) | Out-Null
+    foreach ($name in @('empty.bin','bytes [literal].bin')) {
+        $hashFile = Join-Path $testRoot $name
+        $bytes = if ($name -eq 'empty.bin') { New-Object byte[] 0 } else { [byte[]](0..255) }
+        [IO.File]::WriteAllBytes($hashFile, $bytes)
+        Assert-True ((Get-StackFileSHA256 $hashFile) -ceq (Get-FileHash -LiteralPath $hashFile -Algorithm SHA256).Hash) 'Streaming hash matches the independent SHA256 reader for empty and binary files'
+    }
+    Push-Location $testRoot
+    try {
+        Assert-True ((Get-StackFileSHA256 'bytes [literal].bin') -ceq (Get-FileHash -LiteralPath 'bytes [literal].bin' -Algorithm SHA256).Hash) 'Relative hash paths use the PowerShell working directory and remain literal'
+    }
+    finally { Pop-Location }
+    Write-Host 'PASS: Streaming SHA256 parity and relative literal paths'
+
     $session = New-Fixture "fresh A's [stack]"
     Install-StackCommandRegistration -InstallPath $session.Root -PersistPath $false
     Complete-StackInstallationTracking $session $true
@@ -67,6 +81,16 @@ try {
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack'))) 'Owned registration removed'
     Apply-Plan (Get-StackUninstallPlan $session.Root)
     Write-Host 'PASS: Preview/WhatIf, custom path, fresh removal, native registration and repeat uninstall'
+
+    $session = New-Fixture 'edit-after-preview'
+    Complete-StackInstallationTracking $session $true
+    $plan = Get-StackUninstallPlan $session.Root
+    $editedFile = Join-Path $session.Root 'scripts\program.ps1'
+    Write-Fixture $editedFile '# user changed this after seeing the preview'
+    Apply-Plan $plan
+    Assert-True ([IO.File]::ReadAllText($editedFile).Contains('user changed this')) 'Changes after preview are preserved when applying the plan'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $session.Root '.venv\Lib\package.py'))) 'Unchanged owned files are still removed'
+    Write-Host 'PASS: Applying an earlier preview preserves subsequent file edits'
 
     $session = New-Fixture 'running-service-log'
     $logPath = Join-Path $session.Root 'tts\service.log'
