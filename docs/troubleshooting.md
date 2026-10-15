@@ -34,6 +34,44 @@ The command above runs the installer without changing your persistent execution 
 **Note:** Organisation-enforced execution policies may prevent
 these overrides. Only run scripts from sources you trust.
 
+### Synced profiles and missing stack commands
+
+The current profile bootstrap loads `%LOCALAPPDATA%\WindowsHybridAgenticStack\profile.ps1`. This machine-local loader contains the installation path; the synced profile does not. Each PC needs its own local registration. A PC without registration, or whose installed command scripts are missing, should start silently without loading stack commands.
+
+Inspect the profile and local registration:
+
+```powershell
+Get-Content -LiteralPath $PROFILE.CurrentUserCurrentHost
+```
+
+```powershell
+Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'WindowsHybridAgenticStack\profile.ps1') -PathType Leaf
+```
+
+If the second command returns `True`, inspect that file:
+
+```powershell
+Get-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'WindowsHybridAgenticStack\profile.ps1')
+```
+
+If the local loader is disabled or points to an old directory, restore registration from the repository root without reinstalling dependencies:
+
+```powershell
+. .\scripts\profile-loader.ps1
+```
+
+```powershell
+Install-StackProfileLoader -InstallPath 'D:\AI\AgentStack'
+```
+
+Replace the example with the actual installation directory, then open a new Windows PowerShell window. Registration loads only the components present in that directory. If you change the installation directory, pass that directory again on future installer runs or configure `installation.directory`; the installer does not use local registration to choose its destination.
+
+For local-only cleanup, load the helper above and run `Disable-StackProfileLoader`, then open a new window. This keeps the shared bootstrap for other PCs and does not remove software or stop a running TTS service. See [Disable command loading on one PC](../README.md#disable-command-loading-on-one-pc).
+
+Older versions wrote separate agent and TTS blocks with absolute paths. Registration migrates these blocks and creates backups when changing files. If it reports incomplete, nested or duplicate markers, inspect the marked sections and their backups before retrying; the helper leaves both registration files unchanged when marker validation fails.
+
+An absolute path in an old loader is not, by itself, proof of a startup error: the old loaders checked whether their target script existed. Capture the exact PowerShell error before attributing a failure to profile sync. If script execution is blocked, review [PowerShell scripts are disabled](#powershell-scripts-are-disabled); execution policy is specific to each machine.
+
 ### PyTorch fails to load `c10.dll`
 
 An error such as:
@@ -135,4 +173,10 @@ Check your profile configuration:
 Get-Content $PROFILE.CurrentUserCurrentHost
 ```
 
-If script execution is blocked, review [PowerShell execution policy](#powershell-execution-policy).
+If script execution is blocked, review [PowerShell scripts are disabled](#powershell-scripts-are-disabled).
+
+### Perth watermarking fails during TTS startup
+
+The published `resemble-perth==1.0.1` package requires `pkg_resources`. In the reference-machine investigation, setuptools 84.0.0 failed to supply it, while setuptools 80.9.0 allowed the Perth import to succeed. A failed import may surface as `ModuleNotFoundError: No module named 'pkg_resources'` or later as `TypeError: 'NoneType' object is not callable`.
+
+The TTS installer constrains setuptools to `<81` inside its isolated virtual environment and verifies the actual Perth watermarking implementation. Keep this compatibility constraint when maintaining dependencies. Global Python and Whisper do not need modification. Check the stack's `tts\service-errors.log` for the underlying import error before diagnosing another cause.

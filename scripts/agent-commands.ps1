@@ -265,7 +265,7 @@ function Invoke-AgentStackTask {
             }
 
             try {
-                . $ttsScript
+                . $ttsScript -InstallPath $script:AgentStackInstallPath
             }
             catch {
                 Write-Error (

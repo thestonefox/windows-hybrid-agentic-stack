@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
 <#
 .SYNOPSIS
@@ -270,6 +270,20 @@ try {
         -Executable $pythonPath `
         -Arguments @('-m', 'pip', '--version')
 
+    # Fresh Python 3.11 environments may start with pip 22.3.1.
+    # Upgrade packaging tools only inside this stack's virtual environment.
+    # resemble-perth 1.0.1 imports pkg_resources, removed in setuptools 81+.
+    # Keep setuptools below 81 until that dependency supports newer releases.
+    # Use PyPI explicitly so build dependencies remain available.
+    Invoke-CheckedCommand `
+        -Description 'Updating virtual environment packaging tools' `
+        -Executable $pythonPath `
+        -Arguments @(
+            '-m', 'pip', 'install', '--upgrade',
+            '--index-url', 'https://pypi.org/simple',
+            'pip', 'setuptools<81', 'wheel'
+        )
+
     if ($PrepareOnly) {
         Write-Host ''
         Write-Host 'Python environment preparation completed.' `
@@ -291,15 +305,20 @@ try {
         $expectedSuffix = '+cpu'
     }
 
+    # Pin the wheel build explicitly. PyPI provides general dependencies,
+    # while the PyTorch index provides the selected CUDA/CPU wheels.
+    # Without this, a package source build can fail when flit_core is
+    # unavailable from the PyTorch-only index.
     Invoke-CheckedCommand `
         -Description "Installing PyTorch 2.6.0 ($Device)" `
         -Executable $pythonPath `
         -Arguments @(
             '-m', 'pip', 'install',
-            'torch==2.6.0',
-            'torchaudio==2.6.0',
-            'torchvision==0.21.0',
-            '--index-url', $torchIndex
+            '--index-url', 'https://pypi.org/simple',
+            '--extra-index-url', $torchIndex,
+            "torch==2.6.0$expectedSuffix",
+            "torchaudio==2.6.0$expectedSuffix",
+            "torchvision==0.21.0$expectedSuffix"
         )
 
     # Install Chatterbox without invoking its Git-based dependency.
@@ -398,6 +417,17 @@ for name, wanted in expected.items():
             -Force `
             -ErrorAction SilentlyContinue
     }
+
+    # Perth silently replaces its watermarker class with None when an import
+    # fails (for example if pkg_resources is unavailable). Check the actual
+    # implementation rather than just the presence of the package.
+    Invoke-CheckedCommand `
+        -Description 'Verifying Perth watermarking implementation' `
+        -Executable $pythonPath `
+        -Arguments @(
+            '-c',
+            "from perth.perth_net.perth_net_implicit.perth_watermarker import PerthImplicitWatermarker; assert callable(PerthImplicitWatermarker), 'Perth watermarker is unavailable'; print('Perth watermarking import OK')"
+        )
 
     Invoke-CheckedCommand `
         -Description 'Verifying Chatterbox Turbo import' `

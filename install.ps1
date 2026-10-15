@@ -44,6 +44,7 @@ $prerequisiteScript = Join-Path $repoRoot 'scripts\check-prerequisites.ps1'
 $agentSetupScript = Join-Path $repoRoot 'scripts\setup-agents.ps1'
 $commandInstallScript = Join-Path $repoRoot 'scripts\install-agent-commands.ps1'
 $ttsInstallScript = Join-Path $repoRoot 'tts\install-tts.ps1'
+$profileHelper = Join-Path $repoRoot 'scripts\profile-loader.ps1'
 
 function Read-YesNo {
     param(
@@ -119,127 +120,13 @@ function Copy-StackFile {
     Write-Host "Installed: $Destination"
 }
 
-function Install-TtsProfileLoader {
-    param(
-        [string]$Root
-    )
-
-    $ttsScript = Join-Path $Root 'tts\tts.ps1'
-
-    if (-not (Test-Path -LiteralPath $ttsScript -PathType Leaf)) {
-        throw "TTS command script not found: $ttsScript"
-    }
-
-    $profilePath = $PROFILE.CurrentUserCurrentHost
-    $profileDirectory = Split-Path -Parent $profilePath
-
-    if (-not (Test-Path -LiteralPath $profileDirectory)) {
-        New-Item `
-            -ItemType Directory `
-            -Path $profileDirectory `
-            -Force | Out-Null
-    }
-
-    $beginMarker = '# BEGIN WINDOWS HYBRID AGENTIC STACK TTS'
-    $endMarker = '# END WINDOWS HYBRID AGENTIC STACK TTS'
-
-    $escapedPath = $ttsScript.Replace("'", "''")
-
-    $loader = @(
-        $beginMarker
-        "`$stackTtsFile = '$escapedPath'"
-        'if (Test-Path -LiteralPath $stackTtsFile -PathType Leaf) {'
-        '    . $stackTtsFile'
-        '}'
-        'Remove-Variable stackTtsFile -ErrorAction SilentlyContinue'
-        $endMarker
-    ) -join [Environment]::NewLine
-
-    $existing = ''
-
-    if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
-        $existing = [System.IO.File]::ReadAllText($profilePath)
-    }
-
-    $start = $existing.IndexOf(
-        $beginMarker,
-        [System.StringComparison]::Ordinal
-    )
-
-    $end = $existing.IndexOf(
-        $endMarker,
-        [System.StringComparison]::Ordinal
-    )
-
-    if (($start -ge 0) -ne ($end -ge 0)) {
-        throw 'PowerShell profile contains an incomplete TTS loader.'
-    }
-
-    if ($start -ge 0) {
-        if ($end -lt $start) {
-            throw 'PowerShell profile TTS loader markers are invalid.'
-        }
-
-        $end += $endMarker.Length
-
-        $newContent = (
-            $existing.Substring(0, $start) +
-            $loader +
-            $existing.Substring($end)
-        )
-    }
-    else {
-        $separator = ''
-
-        if (
-            $existing.Length -gt 0 -and
-            -not $existing.EndsWith("`n")
-        ) {
-            $separator = [Environment]::NewLine
-        }
-
-        $newContent = (
-            $existing +
-            $separator +
-            $loader +
-            [Environment]::NewLine
-        )
-    }
-
-    if ($newContent -ceq $existing) {
-        Write-Host 'PowerShell TTS profile loader is unchanged.'
-        return
-    }
-
-    if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
-        $backup = "$profilePath.bak.$(
-            [guid]::NewGuid().ToString('N')
-        )"
-
-        Copy-Item `
-            -LiteralPath $profilePath `
-            -Destination $backup `
-            -ErrorAction Stop
-
-        Write-Host "Profile backup: $backup"
-    }
-
-    [System.IO.File]::WriteAllText(
-        $profilePath,
-        $newContent,
-        (New-Object System.Text.UTF8Encoding($false))
-    )
-
-    Write-Host "TTS commands registered in: $profilePath"
-}
-
 try {
     Write-Host ''
     Write-Host 'Windows Hybrid Agentic Stack'
     Write-Host '============================'
     Write-Host ''
 
-    foreach ($file in @($configScript, $prerequisiteScript)) {
+    foreach ($file in @($configScript, $prerequisiteScript, $profileHelper)) {
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
             throw "Required project script missing: $file"
         }
@@ -433,7 +320,8 @@ try {
             -Source (Join-Path $repoRoot 'config\config.json') `
             -Destination (Join-Path $InstallPath 'config\config.json')
 
-        Install-TtsProfileLoader -Root $InstallPath
+        . $profileHelper
+        Install-StackProfileLoader -InstallPath $InstallPath
     }
 
         # Runtime agent commands read the installed configuration.

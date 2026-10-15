@@ -4,7 +4,7 @@ A configurable Windows AI agent toolkit combining local language models, cloud A
 
 The project provides PowerShell commands for interacting with cloud and local AI agents, running agent-assisted tasks, and optionally speaking responses using Chatterbox Turbo.
 
-> **Development status:** This project is under active development. Cloud and local agent setup, PowerShell commands, Chatterbox dependency installation, and TTS command registration are implemented. Voice integration has been tested with a mock speech function. Actual speech synthesis and GPU inference still require end-to-end verification.
+> **Development status:** This project is under active development. A full installation with the profile-sync changes passed on the reference Windows 11 machine, including fresh-session command loading, cloud/local inference, CUDA detection and speech generation. The user confirmed both spoken responses were audible. Actual OneDrive synchronisation between PCs remains unverified.
 
 ## Features
 
@@ -457,6 +457,66 @@ Repeat installations attempt to reuse existing installations and preserve unrela
 
 Changed installed files are backed up where supported.
 
+### PowerShell profiles shared between PCs
+
+Agent and TTS commands use one marked bootstrap in the current user/current host PowerShell profile. The bootstrap looks for a machine-local loader at:
+
+```text
+%LOCALAPPDATA%\WindowsHybridAgenticStack\profile.ps1
+```
+
+The local loader stores the selected installation directory and passes it explicitly to both command scripts. The shared profile contains no installation-specific path. A OneDrive-synchronised profile can therefore load installations in different directories on different PCs. On a PC without local registration, it does nothing; missing command scripts are also skipped.
+
+Installing agents or voice uses the same registration helper. Repeat registration leaves unchanged files alone. Existing separate agent and TTS blocks are migrated to one bootstrap, with backups of changed files. Incomplete, nested or duplicate markers cause registration to stop for review before either registration file is written. Unrelated profile text is preserved.
+
+The helper reads Unicode profiles and falls back to the Windows ANSI code page for files containing invalid UTF-8. Changed files are written as UTF-8 with a BOM for Windows PowerShell 5.1, while backups retain the original bytes.
+
+Each PC has one active installation root. Selecting a different `-InstallPath` switches that PC's registration to the new root and loads the components present there. Components in the old root are not carried over automatically. The old installation and its files are retained; no automatic removal or relocation takes place. Continue to supply your custom path, or save it in `config/config.json`, when rerunning the installer: local registration does not override the installer's configured/default destination.
+
+The bootstrap and loader still follow the machine's PowerShell execution policy. Profile synchronisation does not configure that policy on another PC.
+
+### Disable command loading on one PC
+
+From the repository root, load the helper:
+
+```powershell
+. .\scripts\profile-loader.ps1
+```
+
+Then disable this PC's local loader:
+
+```powershell
+Disable-StackProfileLoader
+```
+
+This backs up an active local loader and replaces it with a harmless comment. It keeps the synced bootstrap so other PCs continue to work. Open a new PowerShell window to verify that the commands no longer load; functions already loaded in an existing session remain available until that session ends. Stop a running TTS service with `tts-stop` before disabling loading if you also want speech processing stopped.
+
+This operation does not uninstall software, remove the installation directory or models, or change execution policy. A full uninstaller is not yet provided. If installation files were removed separately, the bootstrap safely skips their missing command scripts.
+
+For a controlled fresh-install test, see [Installation test and rollback](docs/install-test-rollback.md). Capture a baseline before installation and review the concrete cleanup targets before removing anything.
+
+To restore registration for an existing installation without reinstalling dependencies, load the helper above and run this example with your installation's actual directory:
+
+```powershell
+Install-StackProfileLoader -InstallPath 'D:\AI\AgentStack'
+```
+
+### Isolated profile tests
+
+From the repository root, run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\test-profile-loader.ps1
+```
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\test-profile-integration.ps1
+```
+
+These tests use fresh temporary directories and profiles, and retain the fixtures and backups at the printed paths. They do not modify the real user profile, install software or change persistent execution policy. The helper tests use stub commands. Integration tests run the real installer orchestration and command scripts in a temporary repository copy, with prerequisite checks, dependency installation, model setup, inference and HTTP/audio generation mocked.
+
+They cover empty profiles, unrelated profile text, repeated registration, custom paths, two simulated PCs sharing a profile, missing installations, legacy-block migration, local cleanup and explicit TTS path handling. They do not verify actual OneDrive synchronisation or replace a hardware speech/inference test.
+
 ### Chatterbox Python environment
 
 The TTS installer is located at:
@@ -470,6 +530,8 @@ It can also be run independently:
 ```powershell
 .\tts\install-tts.ps1
 ```
+
+This component installer prepares TTS files and dependencies; use the root installer for automatic profile registration, or the registration helper above for an existing installation.
 
 To prepare only the Python virtual environment:
 
@@ -504,6 +566,8 @@ The initial reference dependency versions include:
 | NumPy | 1.26.4 |
 
 The CPU and CUDA PyTorch installations use different wheel indexes but matching package versions.
+
+Packaging tools are updated only inside the stack's virtual environment. The installer retains `setuptools<81` for the published `resemble-perth==1.0.1` dependency and explicitly verifies its watermarking implementation. CUDA wheels use an explicit `+cu126` build suffix, with PyPI available for general dependencies.
 
 ## Using the AI agents
 
@@ -593,7 +657,7 @@ localagent -v -l "What is 2 plus 2?"
 
 The command displays the OpenCode events and passes the final answer to Chatterbox.
 
-**Voice integration has passed mock testing. End-to-end speech output has not yet been verified in the project installation.**
+**With the new profile loader, cloud and local voice commands generated valid WAV files and completed playback on the reference machine. The user confirmed hearing both responses. Custom-path handling has also passed isolated tests with inference and audio generation mocked.**
 
 ### Agent permissions
 
@@ -714,11 +778,11 @@ The built-in `default` voice is reserved and cannot be removed.
 
 ## Troubleshooting
 
-See [Troubleshooting](troubleshooting.md) for installation, PowerShell, Ollama, OpenCode and Chatterbox issues.
+See [Troubleshooting](docs/troubleshooting.md) for installation, PowerShell, Ollama, OpenCode and Chatterbox issues.
 
 ## Testing status
 
-The project has been tested incrementally using Windows Sandbox.
+The project has been tested incrementally using Windows Sandbox and a reference Windows 11 machine. The latest full installation on 15 October 2026 used the new profile loader; isolated Windows PowerShell 5.1 tests additionally cover custom paths, missing installations and simulated PCs. Earlier Sandbox results retain their original context below.
 
 | Feature | Status |
 |---|---|
@@ -730,17 +794,23 @@ The project has been tested incrementally using Windows Sandbox.
 | Chatterbox Turbo import | Passed after installing Visual C++ Redistributable |
 | TTS PowerShell command registration | Passed |
 | TTS profile loader idempotence | Passed |
-| Agent-to-TTS integration | Passed with mocked speech |
+| Agent-to-TTS integration | Passed with the new loader; user confirmed hearing both cloud and local responses |
 | Full TTS model loading in 4 GB Sandbox | Failed due to insufficient committed memory |
 | Actual CPU speech generation | Not yet verified |
-| CUDA installation and inference | Not yet verified |
-| Cloud model authentication and inference | Not verified by installer |
+| CUDA installation and speech generation | Passed with the new loader on a CUDA-capable NVIDIA GPU with PyTorch 2.6.0+cu126 |
+| Cloud model authentication and inference | Passed in the latest reference-machine smoke test; installer does not verify authentication/inference |
 | Managed 16K Ollama model creation and selection | Passed in Windows Sandbox with Qwen3 8B |
 | Local agent executing `Get-Date` | Passed |
 | Local agent reporting total RAM (16 GB Sandbox) | Passed |
 | Exact local-agent file contents | Passed |
 | Local read-only agent refusal and independent file absence | Passed |
 | Local-agent installation repeat run | Passed |
+| Synced bootstrap, custom roots, missing installations and local cleanup | Passed in isolated Windows PowerShell 5.1 helper tests |
+| Root/agent installer registration and all 12 real command functions | Passed in isolated Windows PowerShell 5.1 integration tests with dependency/model setup mocked |
+| Agent lazy TTS loading with custom root | Passed with real wrappers and mocked inference/HTTP/audio |
+| Actual OneDrive sync between physical PCs | Not yet verified |
+| Full installation after profile-sync changes | Passed from an absent target; all 12 commands loaded in a fresh real-user session; original model digests and persistent policies unchanged |
+| Controlled real-install rollback | Passed: original profile bytes, backup inventory, four original model digests and persistent policies matched baseline; test installation/registration removed; fresh-session startup verified |
 
 Passing the installation and import checks does not mean speech generation has been fully validated.
 
@@ -750,7 +820,7 @@ Development is carried out incrementally, with changes tested in Windows Sandbox
 
 The project uses [Conventional Commits](https://www.conventionalcommits.org/) with scoped commit messages.
 
-Future work includes additional end-to-end TTS verification, CUDA testing, and uninstallation support.
+Future work includes testing actual profile synchronisation between PCs and full uninstallation support.
 
 ## License
 

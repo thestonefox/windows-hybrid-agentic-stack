@@ -254,6 +254,9 @@ function Configure-ProfileExecutionPolicy {
 }
 
 try {
+    $profileHelper = Join-Path $PSScriptRoot 'profile-loader.ps1'
+    . $profileHelper
+
     if ([string]::IsNullOrWhiteSpace($InstallPath)) {
         throw 'InstallPath cannot be empty.'
     }
@@ -305,107 +308,8 @@ try {
             -Destination $userConfigDestination
     }
 
-    $commandScript = Join-Path $runtimeScripts 'agent-commands.ps1'
-
-    # Current Windows PowerShell user and host only.
+    Install-StackProfileLoader -InstallPath $InstallPath
     $profilePath = $PROFILE.CurrentUserCurrentHost
-    $profileDirectory = Split-Path -Parent $profilePath
-
-    if (-not (Test-Path -LiteralPath $profileDirectory)) {
-        New-Item -ItemType Directory `
-            -Path $profileDirectory -Force | Out-Null
-    }
-
-    if (Test-Path -LiteralPath $profilePath) {
-        if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf)) {
-            throw "PowerShell profile path is not a file: $profilePath"
-        }
-
-        $profileContent = Get-Content `
-            -LiteralPath $profilePath -Raw
-    }
-    else {
-        $profileContent = ''
-    }
-
-    $beginMarker = '# BEGIN WINDOWS HYBRID AGENTIC STACK'
-    $endMarker = '# END WINDOWS HYBRID AGENTIC STACK'
-
-    $hasBegin = $profileContent.Contains($beginMarker)
-    $hasEnd = $profileContent.Contains($endMarker)
-
-    if ($hasBegin -ne $hasEnd) {
-        throw 'PowerShell profile contains an incomplete agent loader.'
-    }
-
-    $escapedCommands = $commandScript.Replace("'", "''")
-    $escapedInstallPath = $InstallPath.Replace("'", "''")
-
-    $loader = @"
-$beginMarker
-if (Test-Path -LiteralPath '$escapedCommands' -PathType Leaf) {
-    . '$escapedCommands' -InstallPath '$escapedInstallPath'
-}
-$endMarker
-"@
-
-    if ($hasBegin) {
-        $start = $profileContent.IndexOf($beginMarker)
-        $finish = $profileContent.IndexOf(
-            $endMarker,
-            $start
-        )
-
-        if ($finish -lt 0) {
-            throw 'PowerShell profile loader markers are invalid.'
-        }
-
-        $finish += $endMarker.Length
-
-        $existingLoader = $profileContent.Substring(
-            $start,
-            $finish - $start
-        )
-
-        if ($existingLoader -cne $loader) {
-            throw @"
-Existing PowerShell profile loader differs.
-Review the marked loader in:
-$profilePath
-
-No profile changes were made.
-"@
-        }
-
-        Write-Host 'PowerShell profile loader already installed.'
-    }
-    else {
-        if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
-            $backup = "$profilePath.bak.$([guid]::NewGuid().ToString('N'))"
-
-            Copy-Item `
-                -LiteralPath $profilePath `
-                -Destination $backup `
-                -ErrorAction Stop
-
-            Write-Host "Profile backup created: $backup"
-        }
-
-        $newContent = $profileContent.TrimEnd("`r", "`n")
-
-        if ($newContent.Length -gt 0) {
-            $newContent += "`r`n`r`n"
-        }
-
-        $newContent += $loader + "`r`n"
-
-        $newContent | Set-Content `
-            -LiteralPath $profilePath `
-            -Encoding UTF8 `
-            -ErrorAction Stop
-
-        Write-Host "Updated PowerShell profile: $profilePath"
-    }
 
     Configure-ProfileExecutionPolicy
 
@@ -420,7 +324,7 @@ No profile changes were made.
 }
 catch {
     Write-Host ''
-    Write-Host "Agent command installation error: $($_.Exception.Message)" `
+    Write-Host "Agent command installation error: $($_.ScriptStackTrace) $($_.Exception.Message)" `
         -ForegroundColor Red
 
     exit 1
