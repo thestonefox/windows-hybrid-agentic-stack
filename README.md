@@ -363,11 +363,41 @@ The root installer passes the selected directory to individual components so the
 
 Installed commands are native console applications built locally with Windows PowerShell 5.1's bundled compiler. They host the stack's PowerShell command code through Microsoft's [PowerShell hosting API](https://learn.microsoft.com/en-us/powershell/scripting/developer/hosting/adding-and-invoking-commands?view=powershell-7.2), without loading profiles or setting execution policies. Runtime tests pass with the caller's effective policy remaining Restricted. Enforced organisation policies are checked and restrictive settings cause an explicit error.
 
-The source installer and maintenance scripts are still `.ps1` files and require a context that permits running those scripts. The installer does not configure execution policy or offer to change it. An executable installer for a completely Restricted machine is not yet provided.
+The source installer and maintenance scripts are still `.ps1` files and require a context that permits running those scripts. The installer does not configure execution policy or offer to change it. A read-only executable prototype can preview setup and check prerequisites under Restricted, as described below; executable installation is not yet implemented.
 
 ## Installation
 
 Open Windows PowerShell in the repository root.
+
+### Read-only executable setup prototype
+
+Build with 64-bit Windows PowerShell 5.1 in a context permitted to run the build script:
+
+```powershell
+.\scripts\build-setup.ps1
+```
+
+This uses the Windows compiler and creates `dist\whas-setup-preview.exe`. No .NET SDK is required. Existing output is preserved unless `-Force` is supplied. The generated `dist` directory is ignored by Git.
+
+The resulting EXE runs independently of the repository's loose scripts, including with the caller's policy remaining Restricted:
+
+```powershell
+.\dist\whas-setup-preview.exe --help
+.\dist\whas-setup-preview.exe --plan --cloud --local --voice
+.\dist\whas-setup-preview.exe --check --cloud --local --voice
+```
+
+Without component flags, preview/check use the bundled defaults. Use `--config 'C:\path\settings.json'` for explicit JSON overrides and `--install-path 'D:\AI\AgentStack'` to preview a destination. The build embeds only application code and `config/defaults.json`; user configuration and credentials are not packaged. Copying the EXE alone is sufficient for help/preview; prerequisite checks inspect tools available on the destination PC.
+
+This prototype does not install components, register commands, change profiles or execution policies, or play audio. It has no install action. It uses the existing console host and configuration validation, and respects the same enforced-policy restrictions as native commands. The prerequisite report identifies a working application-hosted check under Restricted without suggesting a policy change. Complete executable installation and signed distribution remain future work.
+
+Run the isolated prototype tests with:
+
+```powershell
+.\tests\test-setup-prototype.ps1
+```
+
+Tests cover a portable EXE, poisoned loose sidecars, Restricted execution, default/explicit component selection, literal paths, JSON validation and prerequisite exit codes. Read-only checks on the reference PC also passed with unchanged PATH, policies and profile state and no installation or registration created. No audio was played. See [prototype evidence](docs/install-test-rollback.md#verified-read-only-setup-prototype).
 
 ### Interactive installation
 

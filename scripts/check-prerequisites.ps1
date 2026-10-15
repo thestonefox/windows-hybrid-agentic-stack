@@ -292,6 +292,9 @@ try {
     if ($managed.Count -gt 0) {
         Add-Check 'Execution policy' 'WARN' "Organisation-managed policy: $effective" $false
     }
+    elseif ($effective -in @('Restricted', 'AllSigned') -and $Host.Name -eq 'WindowsHybridAgenticStack') {
+        Add-Check 'Execution policy' 'PASS' "Current policy: $effective. Application-hosted check; policy unchanged." $false
+    }
     elseif ($effective -in @('Restricted', 'AllSigned')) {
         Add-Check 'Execution policy' 'WARN' "Current policy: $effective. Installer bootstrap guidance may be needed." $false
     }

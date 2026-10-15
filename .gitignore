@@ -27,6 +27,7 @@ venv/
 .env.*
 
 # Editor and OS files
+/dist/
 .vscode/
 .idea/
 .DS_Store
