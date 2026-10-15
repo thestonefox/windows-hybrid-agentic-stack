@@ -526,7 +526,9 @@ On the reference PC in Windows PowerShell 5.1, an isolated fixture of 2,000 file
 | Preview uninstall | 5.08 s | 1.99 s |
 | Apply uninstall | 17.77 s | 7.68 s |
 
-The measured cleanup improvement was about 2.3 times. A larger optimized fixture of 46,641 small files plus one 64 MiB binary also completed: hashing 12.40 s, ownership recording 24.30 s, preview 35.33 s and cleanup 165.76 s. These fixtures measure file-count overhead; they do not reproduce the bytes, disk throughput or running services of a complete CUDA installation. Full cleanup can still take several minutes. The optimized helpers have passed isolated safety and installer integration tests; a new physical-PC installation cycle has not been run for this performance revision.
+The measured cleanup improvement was about 2.3 times. A larger optimized fixture of 46,641 small files plus one 64 MiB binary also completed: hashing 12.40 s, ownership recording 24.30 s, preview 35.33 s and cleanup 165.76 s. These fixtures measure file-count overhead; they do not reproduce the bytes, disk throughput or running services of a complete CUDA installation. Full cleanup can still take several minutes.
+
+The optimized code at commit `5307d7c` subsequently passed a full physical-PC cloud/local/CUDA voice installation and installed-CLI uninstall. Cloud and local inference succeeded, the user confirmed audible speech, and all 35 checks passed after classifying a transient installer pip worker separately from unrelated processes. The installed preview took 51.01 s; applying the installed uninstaller took 267.93 s, including plan creation and revalidation, and removed 46,685 files and only the test-created model. The installed helpers matched the committed source, speech was stopped by uninstall, and the user confirmed clean startup in a new PowerShell window afterward. No helper patching or separate speech shutdown was needed. See [full-cycle evidence](docs/install-test-rollback.md#verified-optimized-full-installation-cycle).
 
 Reproduce the measurements without installing components, starting services, downloading models or changing persistent PATH:
 
