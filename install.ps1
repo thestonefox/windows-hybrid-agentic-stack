@@ -46,6 +46,8 @@ $agentSetupScript = Join-Path $repoRoot 'scripts\setup-agents.ps1'
 $commandInstallScript = Join-Path $repoRoot 'scripts\install-agent-commands.ps1'
 $ttsInstallScript = Join-Path $repoRoot 'tts\install-tts.ps1'
 $registrationHelper = Join-Path $repoRoot 'scripts\command-registration.ps1'
+$trackingSession = $null
+$installationSucceeded = $false
 
 function Read-YesNo {
     param(
@@ -130,6 +132,9 @@ try {
     foreach ($file in @($configScript, $prerequisiteScript, $registrationHelper,
         (Join-Path $repoRoot 'scripts\command-host.cs'),
         (Join-Path $repoRoot 'scripts\configuration.ps1'),
+        (Join-Path $repoRoot 'scripts\installation-state.ps1'),
+        (Join-Path $repoRoot 'scripts\uninstall.ps1'),
+        (Join-Path $repoRoot 'uninstall.ps1'),
         (Join-Path $repoRoot 'scripts\profile-loader.ps1'))) {
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
             throw "Required project script missing: $file"
@@ -269,6 +274,17 @@ try {
     Write-Host 'Prerequisite checks completed.' `
         -ForegroundColor Green
 
+    . (Join-Path $repoRoot 'scripts\installation-state.ps1')
+    $trackingArguments = @{ InstallPath = $InstallPath }
+    if ($Local) {
+        $safeModel = ([string]$config.agents.local.model).ToLowerInvariant() -replace '[^a-z0-9-]', '-'
+        $trackingArguments.ManagedModelName = 'whas-' + $safeModel.Trim('-') + '-ctx' + $config.agents.local.contextSize
+    }
+    $trackingSession = Start-StackInstallationTracking @trackingArguments
+    foreach ($relative in @('uninstall.ps1','scripts\uninstall.ps1','scripts\installation-state.ps1','scripts\command-registration.ps1')) {
+        Copy-StackFile -Source (Join-Path $repoRoot $relative) -Destination (Join-Path $InstallPath $relative)
+    }
+
     if ($Cloud -or $Local) {
         Write-Host ''
         Write-Host 'Configuring OpenCode agents...'
@@ -378,6 +394,9 @@ try {
             Write-Host "Runtime local model: $runtimeModel"
         }
     Write-Host ''
+    Complete-StackInstallationTracking -Session $trackingSession -Succeeded $true
+    $trackingSession = $null
+    $installationSucceeded = $true
     Write-Host 'Installation completed.' -ForegroundColor Green
 
     if ($Cloud -or $Local) {
@@ -414,4 +433,10 @@ catch {
         -ForegroundColor Red
 
     exit 1
+}
+finally {
+    if ($null -ne $trackingSession) {
+        try { Complete-StackInstallationTracking -Session $trackingSession -Succeeded $installationSucceeded }
+        catch { Write-Warning "Ownership tracking is incomplete; uninstaller will retain unverified files: $($_.Exception.Message)" }
+    }
 }

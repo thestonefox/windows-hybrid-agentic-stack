@@ -485,6 +485,34 @@ Install-StackCommandRegistration -InstallPath 'D:\AI\AgentStack'
 
 For a controlled fresh-install test, see [Installation test and rollback](docs/install-test-rollback.md). Capture a baseline before installation and review cleanup targets before removing anything.
 
+### Uninstall a tracked installation
+
+New installations include an ownership record and a copy of `uninstall.ps1`. From the repository or the installed directory, preview removal:
+
+```powershell
+.\uninstall.ps1
+```
+
+Use `-InstallPath 'D:\AI\AgentStack'` to select a particular installation. Add `-Verbose` to list every file action. Preview does not stop services, change PATH or remove files. To apply the displayed plan with confirmation:
+
+```powershell
+.\uninstall.ps1 -Apply
+```
+
+All Ollama models are retained by default. To also remove unchanged models that this installation created:
+
+```powershell
+.\uninstall.ps1 -Apply -RemoveManagedModels
+```
+
+The uninstaller verifies file hashes, stops only the matching speech launcher/worker, removes owned command registration and files, and restores original configuration bytes when the installed copy has not been edited. A previous command registration is restored when its installation still exists. Pre-existing models and changed model digests are preserved; a model referenced by another registered tracked installation is also retained.
+
+Custom voices, added files, edited files, pre-existing virtual environments and unrelated software are preserved. Known generated speech logs, the last-spoken WAV and bytecode caches in a newly created private environment are removed. Preserved data can leave the installation directory and ownership record in place. A receipt lists removed, restored and retained items under `%USERPROFILE%\WHAS-UninstallReceipts`.
+
+Older installations without `.whas-installation.json` require reviewed cleanup; the uninstaller does not assume ownership of their files. Source installer and maintenance scripts still require a context permitted to execute `.ps1` files. Neither uninstall nor its preview changes profiles or execution policies. Package updates made inside an already existing Python environment are not reversed. External caches, credentials and other machine state are outside its ownership record.
+
+The uninstaller has passed isolated Windows PowerShell 5.1 tests, mocked installer integration and live cloud-only and local/voice cleanup tests. The cloud cycle passed 20 checks. The local/voice test exposed and fixed open-log hashing, Numba cache recognition and a speech-process exit race; after a successful shutdown-helper retest, the corrected repository uninstaller removed 46,685 files and the test-created model. All 28 post-cleanup checks passed, including exact PATH restoration, clean normal-profile startup, unchanged profiles/policies and original model digests, and preservation of 12 unrelated Python processes. The earlier 90-check rollback below used the supervised procedure. See [test evidence and limitations](docs/install-test-rollback.md#verified-tracked-uninstaller-local-and-voice-test).
+
 ### Isolated command and installer tests
 
 Run these in Windows PowerShell 5.1 from a context permitted to run test scripts:
@@ -494,6 +522,7 @@ Run these in Windows PowerShell 5.1 from a context permitted to run test scripts
 .\tests\test-command-background.ps1
 .\tests\test-profile-loader.ps1
 .\tests\test-profile-integration.ps1
+.\tests\test-uninstall.ps1
 ```
 
 Tests use temporary directories and fixture profiles, retaining evidence at the printed paths. They leave the real user profile, persistent PATH and execution policies unchanged. Native command tests run children with Restricted policy and check arguments, voice confirmation, custom roots, repeat registration, simulated PCs and unregistering. Legacy migration tests check exact backups and unrelated profile preservation. Integration tests run real installer orchestration and wrappers with dependency installation, model setup, inference and audio mocked.
@@ -769,7 +798,7 @@ See [Troubleshooting](docs/troubleshooting.md) for installation, PowerShell, Oll
 
 ## Testing status
 
-The project has been tested incrementally using Windows Sandbox and a reference Windows 11 machine. The full installation on 15 October 2026 used the previous profile loader. Subsequent physical-PC testing exposed Restricted-policy startup errors from a synced profile, so registration now uses local executable commands. The revised native registration subsequently passed live fresh-terminal discovery, cloud/local inference and audible CUDA speech. Four isolated Windows PowerShell 5.1 test suites cover registration, background process lifetime, legacy migration and installer orchestration. Earlier Sandbox results retain their original context below.
+The project has been tested incrementally using Windows Sandbox and a reference Windows 11 machine. The full installation on 15 October 2026 used the previous profile loader. Subsequent physical-PC testing exposed Restricted-policy startup errors from a synced profile, so registration now uses local executable commands. The revised native registration subsequently passed live fresh-terminal discovery, cloud/local inference and audible CUDA speech. Five isolated Windows PowerShell 5.1 test suites cover registration, background process lifetime, legacy migration, installer orchestration and tracked uninstall. Earlier Sandbox results retain their original context below.
 
 | Feature | Status |
 |---|---|
@@ -811,7 +840,7 @@ Development is carried out incrementally, with changes tested in Windows Sandbox
 
 The project uses [Conventional Commits](https://www.conventionalcommits.org/) with scoped commit messages.
 
-Future work includes an executable installer for Restricted machines and full uninstallation support.
+Future work includes reducing repeated hash-scan costs for large voice environments and an executable installer for Restricted machines.
 
 ## License
 

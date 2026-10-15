@@ -34,6 +34,12 @@ Fresh installation writes no profile. Upgrading removes only recognised legacy s
 
 A missing local installation now produces an error only when a stack command is invoked. The second PC should remain free of stack startup code when the stack has never been registered there.
 
+### Uninstall preserves files or refuses removal
+
+Run `uninstall.ps1 -Verbose` to preview the per-file plan. Edited files, unknown files, custom voices and pre-existing Python environments are preserved. Their presence can leave the installation directory and ownership record behind; the uninstall receipt lists retained files.
+
+An installation without `.whas-installation.json` has no recorded ownership, so the uninstaller refuses to delete its files. Reparse points, changed command executables, mismatched ownership or a PID belonging to another process also stop cleanup for review. Do not delete the ownership record to resolve these errors. Normal interrupted installations retain a record that can be previewed; an abruptly terminated installer may leave additional unverified files, which are preserved.
+
 ### PyTorch fails to load `c10.dll`
 
 An error such as:
