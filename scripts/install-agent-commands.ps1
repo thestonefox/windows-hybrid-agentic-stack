@@ -24,6 +24,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+if (-not ($null -ne ('WindowsHybridAgenticStack.SetupRuntime' -as [type]) -and [WindowsHybridAgenticStack.SetupRuntime]::IsHosting)) {
+    . (Join-Path $PSScriptRoot 'script-invocation.ps1')
+}
 
 function Copy-StackFile {
     param(
@@ -80,7 +83,7 @@ function Copy-StackFile {
 }
 
 try {
-    . (Join-Path $PSScriptRoot 'command-registration.ps1')
+    . (Get-StackSetupScript (Join-Path $PSScriptRoot 'command-registration.ps1'))
 
     if ([string]::IsNullOrWhiteSpace($InstallPath)) {
         throw 'InstallPath cannot be empty.'
@@ -121,6 +124,7 @@ try {
             throw "Required source file not found: $($file.Source)"
         }
     }
+    Copy-StackFile -Source (Join-Path $PSScriptRoot 'script-invocation.ps1') -Destination (Join-Path $runtimeScripts 'script-invocation.ps1')
 
     $userConfigSource = Join-Path $repoRoot 'config\config.json'
     $userConfigDestination = Join-Path $runtimeConfig 'config.json'
@@ -138,7 +142,7 @@ try {
     }
 
     Install-StackCommandRegistration -InstallPath $InstallPath -PersistPath $PersistPath
-    . (Join-Path $PSScriptRoot 'profile-loader.ps1')
+    . (Get-StackSetupScript (Join-Path $PSScriptRoot 'profile-loader.ps1'))
     Remove-StackLegacyProfileLoader
     Write-Host ''
     Write-Host 'PowerShell agent commands installed.' `

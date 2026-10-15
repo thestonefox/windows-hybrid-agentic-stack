@@ -92,10 +92,18 @@ function Invoke-CheckedCommand {
     Write-Host ''
     Write-Host $Description -ForegroundColor Cyan
 
-    & $Executable @Arguments
+    $previousPreference = $ErrorActionPreference
+    try {
+        # Native stderr includes pip progress and import warnings. Preserve it
+        # as diagnostic output; use the process exit code for success/failure.
+        $ErrorActionPreference = 'Continue'
+        & $Executable @Arguments 2>&1 | ForEach-Object { Write-Host $_.ToString() }
+        $commandExitCode = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousPreference }
 
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Description failed (exit code $LASTEXITCODE)."
+    if ($commandExitCode -ne 0) {
+        throw "$Description failed (exit code $commandExitCode)."
     }
 }
 

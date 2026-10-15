@@ -363,13 +363,13 @@ The root installer passes the selected directory to individual components so the
 
 Installed commands are native console applications built locally with Windows PowerShell 5.1's bundled compiler. They host the stack's PowerShell command code through Microsoft's [PowerShell hosting API](https://learn.microsoft.com/en-us/powershell/scripting/developer/hosting/adding-and-invoking-commands?view=powershell-7.2), without loading profiles or setting execution policies. Runtime tests pass with the caller's effective policy remaining Restricted. Enforced organisation policies are checked and restrictive settings cause an explicit error.
 
-The source installer and maintenance scripts are still `.ps1` files and require a context that permits running those scripts. The installer does not configure execution policy or offer to change it. A read-only executable prototype can preview setup and check prerequisites under Restricted, as described below; executable installation is not yet implemented.
+The source installer and maintenance scripts are still `.ps1` files and require a context that permits running those scripts. The installer does not configure execution policy or offer to change it. The standalone setup EXE can install and uninstall the stack under Restricted without changing execution policy, as described below.
 
 ## Installation
 
 Open Windows PowerShell in the repository root.
 
-### Read-only executable setup prototype
+### Standalone executable setup
 
 Build with 64-bit Windows PowerShell 5.1 in a context permitted to run the build script:
 
@@ -377,27 +377,36 @@ Build with 64-bit Windows PowerShell 5.1 in a context permitted to run the build
 .\scripts\build-setup.ps1
 ```
 
-This uses the Windows compiler and creates `dist\whas-setup-preview.exe`. No .NET SDK is required. Existing output is preserved unless `-Force` is supplied. The generated `dist` directory is ignored by Git.
-
-The resulting EXE runs independently of the repository's loose scripts, including with the caller's policy remaining Restricted:
+This uses the Windows compiler and creates `dist\whas-setup.exe`. No .NET SDK is required. Existing output is preserved unless `-Force` is supplied. The generated `dist` directory is ignored by Git. Copy the EXE to the destination PC and keep it outside the installation directory for later uninstall.
 
 ```powershell
-.\dist\whas-setup-preview.exe --help
-.\dist\whas-setup-preview.exe --plan --cloud --local --voice
-.\dist\whas-setup-preview.exe --check --cloud --local --voice
+.\dist\whas-setup.exe --help
+.\dist\whas-setup.exe --plan --cloud --local --voice
+.\dist\whas-setup.exe --check --cloud --local --voice
+.\dist\whas-setup.exe --install --cloud --local --voice
 ```
 
-Without component flags, preview/check use the bundled defaults. Use `--config 'C:\path\settings.json'` for explicit JSON overrides and `--install-path 'D:\AI\AgentStack'` to preview a destination. The build embeds only application code and `config/defaults.json`; user configuration and credentials are not packaged. Copying the EXE alone is sufficient for help/preview; prerequisite checks inspect tools available on the destination PC.
+Explicit component flags select only those components. Without component flags, plan/check/install use the bundled defaults (all three enabled). Installation asks for confirmation; `--yes` accepts that confirmation. Missing local source models still require download confirmation. `--config 'C:\path\settings.json'` reads JSON overrides, and `--install-path 'D:\AI\AgentStack'` selects the destination. Prerequisites must already be installed; setup does not install OpenCode, Ollama or Python itself.
 
-This prototype does not install components, register commands, change profiles or execution policies, or play audio. It has no install action. It uses the existing console host and configuration validation, and respects the same enforced-policy restrictions as native commands. The prerequisite report identifies a working application-hosted check under Restricted without suggesting a policy change. Complete executable installation and signed distribution remain future work.
+The EXE embeds application scripts, agent instructions, the speech service and `config/defaults.json`. User configuration and credentials are not packaged. Help, preview and prerequisite checks run from memory. Install/uninstall extract the compiled assets to a unique temporary directory, host the bundled code, then remove only those known assets and empty temporary directories. Loose scripts beside the EXE are ignored. Profiles are not loaded or changed, and saved execution policies are not changed. Restrictive enforced organization policy stops setup.
 
-Run the isolated prototype tests with:
+Use the same EXE to preview or apply tracked cleanup:
+
+```powershell
+.\dist\whas-setup.exe --uninstall
+.\dist\whas-setup.exe --uninstall --apply
+.\dist\whas-setup.exe --uninstall --apply --remove-managed-models
+```
+
+Uninstall resolves the active local registration, or accepts `--install-path`. `--apply` requests confirmation; add `--yes` to accept it. Model removal is opt-in and includes only unchanged models created by this installation. Changed files, custom voices, pre-existing environments and unrelated tools/models are preserved. `--no-path` leaves saved user PATH unchanged during install/uninstall. Keep that option consistent across a test cycle.
+
+Run the isolated executable tests with:
 
 ```powershell
 .\tests\test-setup-prototype.ps1
 ```
 
-Tests cover a portable EXE, poisoned loose sidecars, Restricted execution, default/explicit component selection, literal paths, JSON validation and prerequisite exit codes. Read-only checks on the reference PC also passed with unchanged PATH, policies and profile state and no installation or registration created. No audio was played. See [prototype evidence](docs/install-test-rollback.md#verified-read-only-setup-prototype).
+Tests cover portable embedded assets, poisoned sidecars, Restricted execution, literal paths, JSON validation, component selection, cancellation, prerequisite/child failures, interrupted cleanup and Git checkout protection. Dependency installation is mocked in isolated tests. A real full native install/uninstall cycle also passed all 35 checks, including cloud/local inference, CUDA speech and baseline restoration. See [live setup evidence](docs/install-test-rollback.md#verified-full-native-setup-and-cleanup).
 
 ### Interactive installation
 
@@ -854,7 +863,7 @@ See [Troubleshooting](docs/troubleshooting.md) for installation, PowerShell, Oll
 
 ## Testing status
 
-The project has been tested incrementally using Windows Sandbox and a reference Windows 11 machine. The full installation on 15 October 2026 used the previous profile loader. Subsequent physical-PC testing exposed Restricted-policy startup errors from a synced profile, so registration now uses local executable commands. The revised native registration subsequently passed live fresh-terminal discovery, cloud/local inference and audible CUDA speech. Five isolated Windows PowerShell 5.1 test suites cover registration, background process lifetime, legacy migration, installer orchestration and tracked uninstall. Earlier Sandbox results retain their original context below.
+The project has been tested incrementally using Windows Sandbox and a reference Windows 11 machine. The full installation on 15 October 2026 used the previous profile loader. Subsequent physical-PC testing exposed Restricted-policy startup errors from a synced profile, so registration now uses local executable commands. The revised native registration subsequently passed live fresh-terminal discovery, cloud/local inference and audible CUDA speech. Seven isolated Windows PowerShell 5.1 test suites cover registration, background process lifetime, legacy migration, installer orchestration, tracked uninstall, standalone setup and native-tool stderr/exit handling. Earlier Sandbox results retain their original context below.
 
 | Feature | Status |
 |---|---|
@@ -879,6 +888,7 @@ The project has been tested incrementally using Windows Sandbox and a reference 
 | Local-agent installation repeat run | Passed |
 | Native commands under Restricted, custom roots, simulated PCs and cleanup | Passed in isolated Windows PowerShell 5.1 tests; persistent user PATH unchanged |
 | Root/agent installer registration and all 12 executable entry points | Passed in isolated Windows PowerShell 5.1 integration tests with dependency/model setup mocked |
+| Standalone EXE install/uninstall under Restricted | Passed a real cloud/local/CUDA voice cycle and all 35 final restoration checks; seven isolated suites also passed |
 | Agent lazy TTS loading with custom root | Passed with real wrappers and mocked inference/HTTP/audio |
 | Second-PC PowerShell startup after the redesign | Passed: user confirmed no profile errors when opening a fresh window |
 | Previous profile sync between physical PCs | Matching profile hash confirmed; Restricted blocked startup, prompting the native registration redesign |
@@ -896,7 +906,7 @@ Development is carried out incrementally, with changes tested in Windows Sandbox
 
 The project uses [Conventional Commits](https://www.conventionalcommits.org/) with scoped commit messages.
 
-Future work includes reducing repeated hash-scan costs for large voice environments and an executable installer for Restricted machines.
+Future work includes signed executable distribution and further performance work for large voice environments.
 
 ## License
 

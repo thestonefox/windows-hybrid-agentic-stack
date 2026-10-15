@@ -12,6 +12,7 @@ $defaultRegistration = Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack
 $installBefore = Test-Path -LiteralPath $defaultInstall
 $registrationBefore = Test-Path -LiteralPath $defaultRegistration
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('whas-setup-tests-' + [guid]::NewGuid().ToString('N'))
+$fakeUser = Join-Path $fixture 'user'
 function Assert-True {
     param([bool]$Value,[string]$Message)
     if (-not $Value) { throw "FAIL: $Message" }
@@ -21,12 +22,14 @@ function Quote-Literal {
     return "'" + $Text.Replace("'", "''") + "'"
 }
 function Invoke-RestrictedSetup {
-    param([string[]]$SetupArguments, [int]$ExpectedExit = 0, [switch]$FailPrerequisites)
+    param([string[]]$SetupArguments, [int]$ExpectedExit = 0, [switch]$FailPrerequisites, [switch]$FailAgentSetup, [string]$InputText)
     $arguments = @($SetupArguments | ForEach-Object { Quote-Literal $_ }) -join ','
     $code = @"
 `$ErrorActionPreference='Stop'
 if ((Get-ExecutionPolicy) -ne 'Restricted') { throw 'Test child is not Restricted' }
 `$env:WHAS_TEST_PREREQUISITE_FAIL='$([int][bool]$FailPrerequisites)'
+`$env:WHAS_TEST_AGENT_FAIL='$([int][bool]$FailAgentSetup)'
+`$env:USERPROFILE=$(Quote-Literal $fakeUser)
 `$arguments=@($arguments)
 `$ErrorActionPreference='Continue'
 & $(Quote-Literal $portableExe) @arguments
@@ -43,10 +46,13 @@ exit `$actual
     $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
+    $start.RedirectStandardInput = $true
     $process = [Diagnostics.Process]::Start($start)
     try {
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
+        if ($null -ne $InputText) { $process.StandardInput.Write($InputText) }
+        $process.StandardInput.Close()
         if (-not $process.WaitForExit(60000)) { $process.Kill(); throw 'Restricted test child timed out.' }
         $output = $stdout.Result + $stderr.Result
         if ($process.ExitCode -ne $ExpectedExit) { Write-Host $output; throw "FAIL: Child exit $($process.ExitCode), expected $ExpectedExit" }
@@ -57,8 +63,11 @@ exit `$actual
 try {
     # Build a disposable source fixture with a deterministic prerequisite checker.
     $source = Join-Path $fixture 'source'
-    foreach ($relative in @('scripts\command-host.cs','scripts\setup-host.cs','scripts\build-setup.ps1',
-        'scripts\setup-preview.ps1','scripts\configuration.ps1','config\defaults.json')) {
+    foreach ($relative in @('install.ps1','uninstall.ps1','scripts\command-host.cs','scripts\setup-host.cs','scripts\setup-runtime.cs','scripts\build-setup.ps1',
+        'scripts\setup-preview.ps1','scripts\configuration.ps1','config\defaults.json','config\AGENTS.md','scripts\script-invocation.ps1',
+        'scripts\setup-agents.ps1','scripts\install-agent-commands.ps1','scripts\command-registration.ps1','scripts\profile-loader.ps1',
+        'scripts\config.ps1','scripts\agent-commands.ps1','scripts\installation-state.ps1','scripts\uninstall.ps1',
+        'tts\install-tts.ps1','tts\tts.ps1','tts\tts_service.py')) {
         $destination = Join-Path $source $relative
         [IO.Directory]::CreateDirectory((Split-Path -Parent $destination)) | Out-Null
         Copy-Item -LiteralPath (Join-Path $repo $relative) -Destination $destination
@@ -70,6 +79,24 @@ Write-Host "CHECK Cloud=$Cloud Local=$Local Voice=$Voice POLICY=$(Get-ExecutionP
 if ($env:WHAS_TEST_PREREQUISITE_FAIL -eq '1') { exit 1 }
 exit 0
 '@)
+    [IO.File]::WriteAllText((Join-Path $source 'scripts\setup-agents.ps1'), @'
+param([switch]$Cloud,[switch]$Local,[string]$InstallPath,[string]$CloudModel,[string]$LocalModel,[int]$LocalContextSize)
+if ($env:WHAS_TEST_AGENT_FAIL -eq '1') { exit 2 }
+if (-not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'config\AGENTS.md'))) { throw 'Bundled script lost its source path' }
+[IO.Directory]::CreateDirectory($InstallPath) | Out-Null
+[IO.File]::WriteAllText((Join-Path $InstallPath 'opencode.json'), (@{model=$CloudModel}|ConvertTo-Json))
+[IO.File]::WriteAllText((Join-Path $InstallPath 'AGENTS.md'), 'fixture instructions')
+exit 0
+'@)
+    [IO.File]::WriteAllText((Join-Path $source 'tts\install-tts.ps1'), @'
+param([string]$InstallPath,[string]$Device)
+if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'tts_service.py'))) { throw 'Missing bundled speech service' }
+[IO.Directory]::CreateDirectory((Join-Path $InstallPath 'tts')) | Out-Null
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'tts.ps1') -Destination (Join-Path $InstallPath 'tts\tts.ps1')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'tts_service.py') -Destination (Join-Path $InstallPath 'tts\tts_service.py')
+Write-Host "VOICE FIXTURE Device=$Device"
+exit 0
+'@)
     $portable = Join-Path $fixture ("Portable A's [setup] " + [char]0xe9)
     [IO.Directory]::CreateDirectory($portable) | Out-Null
     $portableExe = Join-Path $portable 'whas-setup-preview.exe'
@@ -79,7 +106,7 @@ exit 0
     try { & (Join-Path $source 'scripts\build-setup.ps1') -OutputPath $portableExe } catch { $rejected = $true }
     Assert-True $rejected 'Build refuses to replace existing output without Force'
     $output = Invoke-RestrictedSetup @('--help')
-    Assert-True ($output.Contains('does not install components')) 'Standalone help identifies prototype scope'
+    Assert-True ($output.Contains('Install selected cloud, local and voice components')) 'Standalone help identifies installation scope'
     $output = Invoke-RestrictedSetup @()
     Assert-True ($output.Contains('Usage:')) 'No arguments show help'
     # Poison loose scripts/defaults next to the EXE: only compiled assets may run.
@@ -107,12 +134,56 @@ exit 0
     $null = Invoke-RestrictedSetup @('--plan','--config',$overrides) -ExpectedExit 1
     $null = Invoke-RestrictedSetup @('--install-path') -ExpectedExit 1
     $null = Invoke-RestrictedSetup @('--plan','--check') -ExpectedExit 1
-    $null = Invoke-RestrictedSetup @('--install') -ExpectedExit 1
-    Write-Host 'PASS: JSON override validation, missing values, incompatible actions and unsupported install rejected'
+    $null = Invoke-RestrictedSetup @('--install','--remove-managed-models') -ExpectedExit 1
+    Write-Host 'PASS: JSON override validation, missing values, incompatible actions and invalid model-removal action rejected'
     $output = Invoke-RestrictedSetup @('--check','--local')
     Assert-True ($output.Contains('CHECK Cloud=False Local=True Voice=False POLICY=Restricted') -and $output.Contains('CHECK PIPELINE OUTPUT')) 'Embedded checker sees Restricted and forwards selection/output'
     $null = Invoke-RestrictedSetup @('--check','--voice') -ExpectedExit 1 -FailPrerequisites
     Write-Host 'PASS: Prerequisite success/failure exit codes and formatted pipeline output'
+    $target = Join-Path $fixture ("Cloud A's [installed] " + [char]0xe9)
+    $null = Invoke-RestrictedSetup @('--install','--cloud','--install-path',$target,'--no-path') -InputText "n`n"
+    Assert-True (-not (Test-Path -LiteralPath $target)) 'Declining installation creates no target'
+    $null = Invoke-RestrictedSetup @('--install','--cloud','--install-path',$target,'--no-path','--yes') -FailPrerequisites -ExpectedExit 1
+    Assert-True (-not (Test-Path -LiteralPath $target)) 'Failed prerequisites leave target absent'
+    [IO.File]::WriteAllText($overrides, '{"agents":{"cloud":{"model":"openai/native-fixture"}}}')
+    $output = Invoke-RestrictedSetup @('--install','--cloud','--config',$overrides,'--install-path',$target,'--no-path','--yes')
+    $ownershipPath = Join-Path $target '.whas-installation.json'
+    $ownership = Get-Content -LiteralPath $ownershipPath -Raw | ConvertFrom-Json
+    Assert-True ($ownership.Status -eq 'Installed' -and @($ownership.Files.Path) -contains 'scripts/script-invocation.ps1') 'Native nested scripts finish and track runtime dispatcher'
+    $configuration = Get-Content -LiteralPath (Join-Path $target 'opencode.json') -Raw | ConvertFrom-Json
+    Assert-True ($configuration.model -ceq 'openai/native-fixture') 'Native installation applies explicit config overrides'
+    Assert-True (Test-Path -LiteralPath (Join-Path $fakeUser '.windows-hybrid-agentic-stack\bin\agent.exe')) 'Native installation registers real executable launchers in isolated user folder'
+    $hash = (Get-FileHash -LiteralPath $ownershipPath).Hash
+    $null = Invoke-RestrictedSetup @('--uninstall','--install-path',$target,'--no-path')
+    Assert-True ((Get-FileHash -LiteralPath $ownershipPath).Hash -ceq $hash) 'Native uninstall preview is read-only'
+    $null = Invoke-RestrictedSetup @('--uninstall','--install-path',$target,'--no-path','--apply','--yes')
+    Assert-True (-not (Test-Path -LiteralPath $target) -and -not (Test-Path -LiteralPath (Join-Path $fakeUser '.windows-hybrid-agentic-stack'))) 'Native uninstall removes owned target and isolated registration under Restricted'
+    Write-Host 'PASS: Cloud install/uninstall under Restricted, decline/failure safety, config overrides and ownership tracking'
+    $interrupted = Join-Path $fixture 'interrupted'
+    $null = Invoke-RestrictedSetup @('--install','--cloud','--install-path',$interrupted,'--no-path','--yes') -FailAgentSetup -ExpectedExit 1
+    $ownership = Get-Content -LiteralPath (Join-Path $interrupted '.whas-installation.json') -Raw | ConvertFrom-Json
+    Assert-True ($ownership.Status -eq 'Interrupted') 'Failed child setup propagates its exit status and records partial ownership'
+    $null = Invoke-RestrictedSetup @('--uninstall','--install-path',$interrupted,'--no-path','--apply','--yes')
+    Assert-True (-not (Test-Path -LiteralPath $interrupted)) 'Interrupted native installation can be removed'
+    $protected = Join-Path $fixture 'git checkout'
+    [IO.Directory]::CreateDirectory((Join-Path $protected '.git')) | Out-Null
+    $null = Invoke-RestrictedSetup @('--install','--cloud','--install-path',$protected,'--no-path','--yes') -ExpectedExit 1
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $protected '.whas-installation.json'))) 'Native installer refuses a Git checkout before tracking writes'
+    Write-Host 'PASS: Interrupted native install cleanup and Git checkout protection'
+    foreach ($components in @(@('--local'),@('--voice'),@('--cloud','--local','--voice'))) {
+        $componentTarget = Join-Path $fixture ('components-' + [guid]::NewGuid().ToString('N'))
+        $output = Invoke-RestrictedSetup (@('--install','--install-path',$componentTarget,'--no-path','--yes') + $components)
+        $expectedSelection = 'CHECK Cloud=' + [string]($components -contains '--cloud') + ' Local=' + [string]($components -contains '--local') + ' Voice=' + [string]($components -contains '--voice') + ' POLICY=Restricted'
+        Assert-True ($output.Contains($expectedSelection)) 'Component switches reach nested prerequisite checker'
+        $ownership = Get-Content -LiteralPath (Join-Path $componentTarget '.whas-installation.json') -Raw | ConvertFrom-Json
+        Assert-True ($ownership.Status -eq 'Installed') 'Selected native components finalize ownership'
+        if ($components -contains '--voice') {
+            Assert-True ($output.Contains('VOICE FIXTURE Device=auto') -and (Test-Path -LiteralPath (Join-Path $componentTarget 'tts\tts_service.py'))) 'Native voice invokes bundled installer and preserves source paths'
+        }
+        $null = Invoke-RestrictedSetup @('--uninstall','--install-path',$componentTarget,'--no-path','--apply','--yes','--remove-managed-models')
+        Assert-True (-not (Test-Path -LiteralPath $componentTarget)) 'Selected native components uninstall cleanly'
+    }
+    Write-Host 'PASS: Local-only, voice-only and full native component orchestration under Restricted (dependencies mocked)'
     Write-Host 'All setup prototype tests passed.'
 }
 finally {

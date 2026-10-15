@@ -186,7 +186,7 @@ try {
     Write-Host 'PASS: Replaced command registration restored when its installation still exists'
 
     $session = New-Fixture 'installed-uninstaller'
-    foreach ($relative in @('uninstall.ps1','scripts\installation-state.ps1','scripts\uninstall.ps1','scripts\command-registration.ps1')) {
+    foreach ($relative in @('uninstall.ps1','scripts\script-invocation.ps1','scripts\installation-state.ps1','scripts\uninstall.ps1','scripts\command-registration.ps1')) {
         $destination = Join-Path $session.Root $relative
         Copy-Item -LiteralPath (Join-Path $repo $relative) -Destination $destination
     }
@@ -288,6 +288,16 @@ try {
         $script:StoppedProcesses += $Id
         $script:FakeProcesses = @($script:FakeProcesses | Where-Object ProcessId -ne $Id)
     }
+    $session = New-Fixture 'speech-never-started'
+    Write-Fixture (Join-Path $session.Root 'tts\tts_service.py') '# fixture service'
+    Complete-StackInstallationTracking $session $true
+    $script:FakeProcesses = @(
+        [pscustomobject]@{ Name='System Idle Process'; ProcessId=0; ParentProcessId=0; CreationDate=$null; CommandLine=$null; ExecutablePath=$null }
+    )
+    Apply-Plan (Get-StackUninstallPlan $session.Root)
+    Assert-True (-not (Test-Path -LiteralPath $session.Root) -and $script:StoppedProcesses.Count -eq 0) 'Never-started speech ignores system PID zero and removes owned files'
+    Write-Host 'PASS: Speech installed without a PID file uninstalls without touching any process'
+
     $session = New-Fixture 'pid-verification'
     Write-Fixture (Join-Path $session.Root 'tts\tts_service.py') '# fixture service'
     Complete-StackInstallationTracking $session $true

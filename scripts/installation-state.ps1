@@ -15,6 +15,7 @@ function Resolve-StackOwnedPath {
 function Assert-StackInstallationRoot {
     param([string]$Root)
     $full = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+    if (Test-Path -LiteralPath (Join-Path $full '.git')) { throw "Refusing to manage a Git checkout: $full" }
     $repository = Split-Path -Parent $PSScriptRoot
     if (-not (Test-Path -LiteralPath (Join-Path $repository '.git'))) { $repository = $null }
     foreach ($protected in @([IO.Path]::GetPathRoot($full).TrimEnd('\'), $env:USERPROFILE,
@@ -190,7 +191,7 @@ function Start-StackInstallationTracking {
     foreach ($entry in $state.OriginalFiles) { $originals[$entry.Path] = $entry }
     $managedFiles = @('opencode.json','AGENTS.md','config/defaults.json','config/config.json',
         'scripts/agent-commands.ps1','scripts/config.ps1','scripts/configuration.ps1',
-        'scripts/command-registration.ps1','scripts/installation-state.ps1','scripts/uninstall.ps1',
+        'scripts/command-registration.ps1','scripts/installation-state.ps1','scripts/uninstall.ps1','scripts/script-invocation.ps1',
         'tts/tts.ps1','tts/tts_service.py','uninstall.ps1')
     foreach ($relative in $tree.Files | Where-Object { $_ -ne '.whas-installation.json' }) {
         if (Test-StackGeneratedFile $relative $state) { continue }

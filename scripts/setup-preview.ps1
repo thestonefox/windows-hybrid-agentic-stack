@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-# Embedded application code for the read-only setup prototype.
+# Embedded setup selection and preview. No writes are performed here.
 param(
     [string]$DefaultsJson,
     [string]$ConfigPath,
@@ -29,9 +29,10 @@ if (-not $InstallPath) { $InstallPath = Join-Path $HOME 'AI\WindowsHybridAgentic
 $InstallPath = [Environment]::ExpandEnvironmentVariables($InstallPath)
 if ($InstallPath -match '^\$HOME(?=[\\/]|$)') { $InstallPath = $HOME + $InstallPath.Substring(5) }
 $InstallPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallPath)
+$config.installation.directory = $InstallPath
 if ($Voice -and $config.tts.engine -ne 'chatterbox-turbo') { throw "Unsupported TTS engine: $($config.tts.engine)" }
 if ($ShowPlan) {
-    Write-Host 'Installation preview (read-only prototype)'
+    Write-Host 'Installation preview'
     Write-Host "Directory:    $InstallPath"
     Write-Host "Cloud agents: $Cloud"
     Write-Host "Local agents: $Local"
@@ -45,6 +46,6 @@ if ($ShowPlan) {
         Write-Host "TTS engine:   $($config.tts.engine)"
         Write-Host "TTS device:   $($config.tts.device)"
     }
-    Write-Host 'Preview complete. This prototype does not install components.'
+    Write-Host 'Preview complete. No changes made.'
 }
-[pscustomobject]@{ Cloud = $Cloud; Local = $Local; Voice = $Voice }
+[pscustomobject]@{ Cloud = $Cloud; Local = $Local; Voice = $Voice; InstallPath = $InstallPath; ConfigJson = ($config | ConvertTo-Json -Depth 50) }

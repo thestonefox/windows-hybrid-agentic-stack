@@ -32,6 +32,7 @@ param(
     [switch]$Cloud,
     [switch]$Local,
     [switch]$Voice,
+    [switch]$Yes,
     [string]$InstallPath,
     [bool]$PersistCommandPath = $true
 )
@@ -39,6 +40,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = $PSScriptRoot
+if (-not ($null -ne ('WindowsHybridAgenticStack.SetupRuntime' -as [type]) -and [WindowsHybridAgenticStack.SetupRuntime]::IsHosting)) {
+    . (Join-Path $repoRoot 'scripts\script-invocation.ps1')
+}
 
 $configScript = Join-Path $repoRoot 'scripts\config.ps1'
 $prerequisiteScript = Join-Path $repoRoot 'scripts\check-prerequisites.ps1'
@@ -141,13 +145,13 @@ try {
         }
     }
 
-    & $configScript -Validate
+    Invoke-StackSetupScript -Path $configScript -Arguments @{Validate=$true}
 
     if ($LASTEXITCODE -ne 0) {
         throw 'Configuration validation failed.'
     }
 
-    $configJson = & $configScript -Show
+    $configJson = Invoke-StackSetupScript -Path $configScript -Arguments @{Show=$true}
 
     if ($LASTEXITCODE -ne 0) {
         throw 'Unable to load configuration.'
@@ -244,7 +248,7 @@ try {
 
     Write-Host ''
 
-    if (-not (Read-YesNo -Question 'Continue with installation?')) {
+    if (-not $Yes -and -not (Read-YesNo -Question 'Continue with installation?')) {
         Write-Host 'Installation cancelled. No changes made.'
         exit 0
     }
@@ -259,7 +263,7 @@ try {
         Voice = [bool]$Voice
     }
 
-    & $prerequisiteScript @checkArguments
+    Invoke-StackSetupScript -Path $prerequisiteScript -Arguments $checkArguments
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host ''
@@ -274,14 +278,14 @@ try {
     Write-Host 'Prerequisite checks completed.' `
         -ForegroundColor Green
 
-    . (Join-Path $repoRoot 'scripts\installation-state.ps1')
+    . (Get-StackSetupScript (Join-Path $repoRoot 'scripts\installation-state.ps1'))
     $trackingArguments = @{ InstallPath = $InstallPath }
     if ($Local) {
         $safeModel = ([string]$config.agents.local.model).ToLowerInvariant() -replace '[^a-z0-9-]', '-'
         $trackingArguments.ManagedModelName = 'whas-' + $safeModel.Trim('-') + '-ctx' + $config.agents.local.contextSize
     }
     $trackingSession = Start-StackInstallationTracking @trackingArguments
-    foreach ($relative in @('uninstall.ps1','scripts\uninstall.ps1','scripts\installation-state.ps1','scripts\command-registration.ps1')) {
+    foreach ($relative in @('uninstall.ps1','scripts\uninstall.ps1','scripts\installation-state.ps1','scripts\command-registration.ps1','scripts\script-invocation.ps1')) {
         Copy-StackFile -Source (Join-Path $repoRoot $relative) -Destination (Join-Path $InstallPath $relative)
     }
 
@@ -299,7 +303,7 @@ try {
             LocalContextSize = [int]$config.agents.local.contextSize
         }
 
-        & $agentSetupScript @setupArguments
+        Invoke-StackSetupScript -Path $agentSetupScript -Arguments $setupArguments
 
         if ($LASTEXITCODE -ne 0) {
             throw 'OpenCode agent setup failed.'
@@ -309,7 +313,7 @@ try {
         Write-Host 'Installing PowerShell agent commands...'
         Write-Host ''
 
-        & $commandInstallScript -InstallPath $InstallPath -PersistPath $PersistCommandPath
+        Invoke-StackSetupScript -Path $commandInstallScript -Arguments @{InstallPath=$InstallPath;PersistPath=$PersistCommandPath}
 
         if ($LASTEXITCODE -ne 0) {
             throw 'PowerShell agent command installation failed.'
@@ -322,9 +326,7 @@ try {
         Write-Host 'Installing Chatterbox Turbo...'
         Write-Host ''
 
-        & $ttsInstallScript `
-            -InstallPath $InstallPath `
-            -Device ([string]$config.tts.device)
+        Invoke-StackSetupScript -Path $ttsInstallScript -Arguments @{InstallPath=$InstallPath;Device=[string]$config.tts.device}
 
         if ($LASTEXITCODE -ne 0) {
             throw 'Chatterbox Turbo installation failed.'
@@ -340,9 +342,9 @@ try {
             -Source (Join-Path $repoRoot 'config\config.json') `
             -Destination (Join-Path $InstallPath 'config\config.json')
 
-        . $registrationHelper
+        . (Get-StackSetupScript $registrationHelper)
         Install-StackCommandRegistration -InstallPath $InstallPath -PersistPath $PersistCommandPath
-        . (Join-Path $repoRoot 'scripts\profile-loader.ps1')
+        . (Get-StackSetupScript (Join-Path $repoRoot 'scripts\profile-loader.ps1'))
         Remove-StackLegacyProfileLoader
     }
 

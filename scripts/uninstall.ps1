@@ -136,7 +136,7 @@ function Stop-StackOwnedSpeech {
     if ($saved -notmatch '^\d+$') { throw 'Invalid speech PID file; no processes stopped.' }
     $marker = '"' + (Join-Path $Root 'tts\tts_service.py') + '"'
     $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
-    $launcher = @($processes | Where-Object ProcessId -eq ([int]$saved))
+    $launcher = @($processes | Where-Object { $hasPid -and $_.ProcessId -eq ([int]$saved) })
     if ($launcher.Count -eq 0) {
         if (@($processes | Where-Object { $_.Name -match '^python(w)?\.exe$' -and $_.CommandLine -and $_.CommandLine.Contains($marker) }).Count -gt 0) {
             throw 'Speech worker has no verified launcher PID; stop it before uninstalling.'

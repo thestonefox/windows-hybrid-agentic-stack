@@ -105,6 +105,8 @@ function Remove-StackLegacyProfileLoader {
     [CmdletBinding()]
     param([string]$ProfilePath = $PROFILE.CurrentUserCurrentHost)
 
+    # Application-hosted runspaces do not load or define a console profile.
+    if ([string]::IsNullOrWhiteSpace($ProfilePath)) { return }
     if (-not (Test-Path -LiteralPath $ProfilePath -PathType Leaf)) { return }
     $before = Read-StackProfileFile -Path $ProfilePath
     $after = Remove-StackProfileContent -Content $before

@@ -51,7 +51,7 @@ try {
     Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
     Write-Host "Test files: $testRoot"
     $fixtureRepo = Join-Path $testRoot 'repository'
-    foreach ($relative in @('install.ps1', 'uninstall.ps1', 'scripts\installation-state.ps1', 'scripts\uninstall.ps1', 'scripts\install-agent-commands.ps1',
+    foreach ($relative in @('install.ps1', 'uninstall.ps1', 'scripts\script-invocation.ps1', 'scripts\installation-state.ps1', 'scripts\uninstall.ps1', 'scripts\install-agent-commands.ps1',
         'scripts\command-registration.ps1', 'scripts\command-host.cs', 'scripts\configuration.ps1', 'scripts\profile-loader.ps1', 'scripts\config.ps1', 'scripts\agent-commands.ps1',
         'config\defaults.json', 'tts\tts.ps1', 'tts\tts_service.py')) {
         $destination = Join-Path $fixtureRepo $relative

@@ -48,7 +48,10 @@ if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path $configDirectory 'config.json'
 }
 
-. (Join-Path $PSScriptRoot 'configuration.ps1')
+if (-not ($null -ne ('WindowsHybridAgenticStack.SetupRuntime' -as [type]) -and [WindowsHybridAgenticStack.SetupRuntime]::IsHosting)) {
+    . (Join-Path $PSScriptRoot 'script-invocation.ps1')
+}
+. (Get-StackSetupScript (Join-Path $PSScriptRoot 'configuration.ps1'))
 
 try {
     if (-not (Test-Path -LiteralPath $defaultsPath -PathType Leaf)) {

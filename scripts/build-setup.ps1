@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Build the standalone read-only setup prototype with the Windows compiler.
+    Build standalone setup with the Windows compiler and bundled application assets.
 .DESCRIPTION
     Packages only checked-in application scripts and defaults. No user config,
     credentials, profiles or environment values are embedded in the executable.
@@ -13,22 +13,31 @@ if ($PSVersionTable.PSVersion.Major -ne 5 -or -not [Environment]::Is64BitProcess
     throw 'Build using 64-bit Windows PowerShell 5.1.'
 }
 $repo = Split-Path -Parent $PSScriptRoot
-if (-not $OutputPath) { $OutputPath = Join-Path $repo 'dist\whas-setup-preview.exe' }
+if (-not $OutputPath) { $OutputPath = Join-Path $repo 'dist\whas-setup.exe' }
 $OutputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
 if ([IO.Path]::GetExtension($OutputPath) -ine '.exe') { throw 'OutputPath must name an .exe file.' }
 if ((Test-Path -LiteralPath $OutputPath) -and -not $Force) { throw 'Output already exists. Use -Force to replace the build artifact.' }
-$assets = [ordered]@{
+$properties = [ordered]@{
     Configuration = 'scripts\configuration.ps1'
     Preview = 'scripts\setup-preview.ps1'
     Prerequisites = 'scripts\check-prerequisites.ps1'
     Defaults = 'config\defaults.json'
 }
 $payload = New-Object Text.StringBuilder
-$null = $payload.AppendLine('using System; using System.Text; namespace WindowsHybridAgenticStack { internal static class SetupPayload {')
-foreach ($name in $assets.Keys) {
-    $content = [IO.File]::ReadAllText((Join-Path $repo $assets[$name]), [Text.Encoding]::UTF8)
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($content))
-    $null = $payload.AppendLine(('internal static string {0} {{ get {{ return Encoding.UTF8.GetString(Convert.FromBase64String("{1}")); }} }}' -f $name,$encoded))
+$null = $payload.AppendLine('using System; using System.Text; using System.Collections.Generic; namespace WindowsHybridAgenticStack { internal static class SetupPayload {')
+$null = $payload.AppendLine('internal static readonly Dictionary<string,string> Files = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase) {')
+$assets = @($properties.Values) + @('install.ps1','uninstall.ps1','config\AGENTS.md',
+    'scripts\script-invocation.ps1','scripts\setup-agents.ps1','scripts\install-agent-commands.ps1',
+    'scripts\command-host.cs','scripts\command-registration.ps1','scripts\profile-loader.ps1',
+    'scripts\config.ps1','scripts\agent-commands.ps1','scripts\installation-state.ps1','scripts\uninstall.ps1',
+    'tts\install-tts.ps1','tts\tts.ps1','tts\tts_service.py')
+foreach ($relative in $assets | Select-Object -Unique) {
+    $encoded = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $repo $relative)))
+    $null = $payload.AppendLine(('{"'+$relative.Replace('\','/')+'","'+$encoded+'"},'))
+}
+$null = $payload.AppendLine('}; internal static string ReadText(string name) { return Encoding.UTF8.GetString(Convert.FromBase64String(Files[name])).TrimStart(new char[] { (char)0xfeff }); }')
+foreach ($name in $properties.Keys) {
+    $null = $payload.AppendLine(('internal static string {0} {{ get {{ return ReadText("{1}"); }} }}' -f $name,$properties[$name].Replace('\','/')))
 }
 $null = $payload.AppendLine('} }')
 $build = Join-Path ([IO.Path]::GetTempPath()) ('whas-setup-build-' + [guid]::NewGuid().ToString('N'))
@@ -48,11 +57,11 @@ try {
     $null = $parameters.ReferencedAssemblies.Add([Management.Automation.PSObject].Assembly.Location)
     $compiler = New-Object Microsoft.CSharp.CSharpCodeProvider
     $result = $compiler.CompileAssemblyFromFile($parameters, [string[]]@(
-        (Join-Path $PSScriptRoot 'command-host.cs'), (Join-Path $PSScriptRoot 'setup-host.cs'), $generated))
+        (Join-Path $PSScriptRoot 'command-host.cs'), (Join-Path $PSScriptRoot 'setup-host.cs'), (Join-Path $PSScriptRoot 'setup-runtime.cs'), $generated))
     if ($result.Errors.HasErrors) { throw (($result.Errors | ForEach-Object ToString) -join [Environment]::NewLine) }
     [IO.Directory]::CreateDirectory((Split-Path -Parent $OutputPath)) | Out-Null
     Move-Item -LiteralPath $compiled -Destination $OutputPath -Force:$Force
-    Write-Host "Built read-only setup prototype: $OutputPath"
+    Write-Host "Built standalone setup: $OutputPath"
 }
 finally {
     if ($null -ne $compiler) { $compiler.Dispose() }

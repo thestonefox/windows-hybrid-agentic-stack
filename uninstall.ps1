@@ -18,9 +18,12 @@ param([string]$InstallPath, [switch]$Apply, [switch]$RemoveManagedModels,
     [bool]$PersistCommandPath = $true)
 $ErrorActionPreference = 'Stop'
 try {
-    . (Join-Path $PSScriptRoot 'scripts\installation-state.ps1')
-    . (Join-Path $PSScriptRoot 'scripts\command-registration.ps1')
-    . (Join-Path $PSScriptRoot 'scripts\uninstall.ps1')
+    if (-not ($null -ne ('WindowsHybridAgenticStack.SetupRuntime' -as [type]) -and [WindowsHybridAgenticStack.SetupRuntime]::IsHosting)) {
+        . (Join-Path $PSScriptRoot 'scripts\script-invocation.ps1')
+    }
+    . (Get-StackSetupScript (Join-Path $PSScriptRoot 'scripts\installation-state.ps1'))
+    . (Get-StackSetupScript (Join-Path $PSScriptRoot 'scripts\command-registration.ps1'))
+    . (Get-StackSetupScript (Join-Path $PSScriptRoot 'scripts\uninstall.ps1'))
     if ([string]::IsNullOrWhiteSpace($InstallPath)) {
         $registration = Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack\commands.json'
         if (Test-Path -LiteralPath (Join-Path $PSScriptRoot '.whas-installation.json')) { $InstallPath = $PSScriptRoot }

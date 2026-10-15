@@ -33,6 +33,20 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $instructionsSource = Join-Path $repoRoot 'config\AGENTS.md'
 
+function Invoke-AgentNativeCommand {
+    param([string]$Executable,[string[]]$Arguments)
+    # Windows PowerShell 5.1 represents redirected native stderr as ErrorRecord
+    # objects. Tools use that stream for progress too; their exit code decides
+    # success. Keep output available without turning progress into termination.
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $Executable @Arguments 2>&1 | ForEach-Object { $_.ToString() }
+        $global:LASTEXITCODE = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousPreference }
+}
+
 function Confirm-Action {
     param([string]$Question)
 
@@ -192,7 +206,7 @@ function Ensure-ContextModel {
             (New-Object System.Text.UTF8Encoding($false))
         )
         Write-Host "Creating context-enabled Ollama model: $managedName"
-        & ollama create $managedName -f $modelfile
+        Invoke-AgentNativeCommand 'ollama' @('create',$managedName,'-f',$modelfile) | ForEach-Object { Write-Host $_ }
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to create Ollama model: $managedName"
         }
@@ -412,7 +426,7 @@ try {
             if (-not (Confirm-Action -Question "Download $LocalModel now?")) {
                 throw "Required Ollama model is missing: $LocalModel"
             }
-            & ollama pull $LocalModel
+            Invoke-AgentNativeCommand 'ollama' @('pull',$LocalModel) | ForEach-Object { Write-Host $_ }
             if ($LASTEXITCODE -ne 0 -or
                 -not (Test-OllamaModel -Name $LocalModel)) {
                 throw "Ollama model download failed: $LocalModel"
@@ -541,7 +555,7 @@ try {
         Write-Host ''
         Write-Host 'Verifying OpenCode configuration...'
 
-        $modelOutput = @(& opencode models 2>&1)
+        $modelOutput = @(Invoke-AgentNativeCommand 'opencode' @('models'))
 
         if ($LASTEXITCODE -ne 0) {
             throw 'OpenCode rejected the model configuration.'
@@ -558,7 +572,7 @@ try {
             }
         }
 
-        $agentOutput = @(& opencode agent list 2>&1)
+        $agentOutput = @(Invoke-AgentNativeCommand 'opencode' @('agent','list'))
 
         if ($LASTEXITCODE -ne 0) {
             throw 'OpenCode could not list the configured agents.'
