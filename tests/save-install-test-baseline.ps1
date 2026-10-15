@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
 <#
 .SYNOPSIS
@@ -13,7 +13,7 @@
 [CmdletBinding()]
 param(
     [string]$InstallPath,
-    [string]$SnapshotDirectory = (Join-Path ([System.IO.Path]::GetTempPath()) (
+    [string]$SnapshotDirectory = (Join-Path (Join-Path $env:USERPROFILE 'WHAS-TestEvidence') (
         'whas-install-baseline-' + [guid]::NewGuid().ToString('N')))
 )
 
@@ -40,6 +40,20 @@ if (Test-Path -LiteralPath $InstallPath) {
 if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
     throw 'LOCALAPPDATA is unavailable.'
 }
+$commandDirectory = Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack\bin'
+$commandState = Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack\commands.json'
+if ((Test-Path -LiteralPath $commandDirectory) -or (Test-Path -LiteralPath $commandState)) {
+    throw 'Fresh-install baseline requires absent local executable registration. Existing registration left untouched.'
+}
+$environmentKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+try {
+    $userPathExisted = $null -ne $environmentKey -and $environmentKey.GetValueNames() -icontains 'Path'
+    $userPathValue = if ($userPathExisted) {
+        [string]$environmentKey.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    } else { $null }
+    $userPathKind = if ($userPathExisted) { [string]$environmentKey.GetValueKind('Path') } else { $null }
+}
+finally { if ($null -ne $environmentKey) { $environmentKey.Dispose() } }
 $SnapshotDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SnapshotDirectory)
 if (Test-Path -LiteralPath $SnapshotDirectory) {
     throw "Snapshot destination already exists: $SnapshotDirectory"
@@ -102,7 +116,7 @@ foreach ($entry in @(
 }
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $baseline = [ordered]@{
-    SchemaVersion = 1
+    SchemaVersion = 2
     CapturedAtUtc = [DateTime]::UtcNow.ToString('o')
     ComputerName = $env:COMPUTERNAME
     UserName = $identity.Name
@@ -113,6 +127,10 @@ $baseline = [ordered]@{
     InstallPathExisted = $false
     InstallParentExisted = Test-Path -LiteralPath (Split-Path -Parent $InstallPath) -PathType Container
     ProfileFiles = $files
+    CommandDirectory = $commandDirectory
+    CommandDirectoryExisted = $false
+    CommandStatePath = $commandState
+    UserPath = @{ Existed = $userPathExisted; RawValue = $userPathValue; RegistryKind = $userPathKind }
     ExecutionPolicies = @(Get-ExecutionPolicy -List | ForEach-Object {
         [pscustomobject]@{ Scope = [string]$_.Scope; Policy = [string]$_.ExecutionPolicy }
     })

@@ -4,10 +4,19 @@ import os
 import json
 import re
 import shutil
+import sys
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+# Native command launchers deliberately pass no inherited pipe handles.
+# Open logs before importing dependencies so their startup warnings are retained.
+if os.environ.get('AGENT_STACK_TTS_OWN_LOGS') == '1':
+    log_dir = Path(__file__).resolve().parent
+    sys.stdout = (log_dir / 'service.log').open('w', encoding='utf-8', buffering=1)
+    sys.stderr = (log_dir / 'service-errors.log').open('w', encoding='utf-8', buffering=1)
+    sys.stdin = open(os.devnull, 'r')
 
 import torchaudio
 from chatterbox.tts_turbo import ChatterboxTurboTTS, Conditionals

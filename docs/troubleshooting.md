@@ -2,75 +2,37 @@
 
 ## PowerShell scripts are disabled
 
-On a fresh Windows installation, PowerShell may refuse to run
-`.ps1` files with an error similar to:
+Installed stack commands are native executables and require no PowerShell profile or execution-policy change. They host application command code internally, and isolated runtime tests pass under Restricted. Source installer and maintenance `.ps1` scripts still require a context permitted to run scripts; a native installer is not yet available. Enforced restrictive organisation policy causes the command host to stop with an administrator-policy message.
 
-```text
-File cannot be loaded because running scripts is disabled on
-this system.
-```
+### Missing stack commands
 
-### Temporary solution (recommended)
+The executable directory is `%USERPROFILE%\.windows-hybrid-agentic-stack\bin`. An earlier development version used AppData, where a packaged host could redirect files into its private cache. That caused `agent` to be missing in ordinary PowerShell even with the expected PATH entry. The current installer uses the user-directory location instead.
 
-Open PowerShell and run:
+Close and reopen the terminal application after installation. A new tab in an existing terminal may still inherit its old PATH. Inspect:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+Get-Command agent,localagent,tts-start -CommandType Application
+Get-Content -LiteralPath (Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack\commands.json')
+Get-Content -LiteralPath (Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack\bin\install-root.txt')
+[Environment]::GetEnvironmentVariable('Path', 'User')
 ```
 
-Then rerun the installation or configuration script.
-
-This applies only to the current PowerShell session. It does
-not permanently modify the system's execution policy.
-
-Alternatively, launch a script directly with:
+Each PC needs its own local registration. Restore it from the repository in a context permitted to run maintenance scripts:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\install.ps1"
+. .\scripts\command-registration.ps1
+Install-StackCommandRegistration -InstallPath 'D:\AI\AgentStack'
 ```
 
-The command above runs the installer without changing your persistent execution policy.
+Use the actual installation directory. This only registers commands; it cannot supply missing runtime files or dependencies. Continue passing the correct installation path on future installer runs, or configure `installation.directory`.
 
-**Note:** Organisation-enforced execution policies may prevent
-these overrides. Only run scripts from sources you trust.
+To remove local registration, stop TTS and run `Unregister-StackCommands` using the same helper. Installation files and models are retained. See [Remove command registration](../README.md#remove-command-registration-on-one-pc).
 
-### Synced profiles and missing stack commands
+### Errors from an older synced profile
 
-The current profile bootstrap loads `%LOCALAPPDATA%\WindowsHybridAgenticStack\profile.ps1`. This machine-local loader contains the installation path; the synced profile does not. Each PC needs its own local registration. A PC without registration, or whose installed command scripts are missing, should start silently without loading stack commands.
+Fresh installation writes no profile. Upgrading removes only recognised legacy stack blocks, with exact backups; unrelated profile code is preserved. Malformed, nested or duplicate markers stop migration for review. If startup still names a profile `.ps1`, inspect that file and its backups; it may contain unrelated scripts or blocks from an older installation. Do not change execution policy merely to suppress an obsolete stack loader error. Even an empty profile script can be rejected under Restricted.
 
-Inspect the profile and local registration:
-
-```powershell
-Get-Content -LiteralPath $PROFILE.CurrentUserCurrentHost
-```
-
-```powershell
-Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'WindowsHybridAgenticStack\profile.ps1') -PathType Leaf
-```
-
-If the second command returns `True`, inspect that file:
-
-```powershell
-Get-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'WindowsHybridAgenticStack\profile.ps1')
-```
-
-If the local loader is disabled or points to an old directory, restore registration from the repository root without reinstalling dependencies:
-
-```powershell
-. .\scripts\profile-loader.ps1
-```
-
-```powershell
-Install-StackProfileLoader -InstallPath 'D:\AI\AgentStack'
-```
-
-Replace the example with the actual installation directory, then open a new Windows PowerShell window. Registration loads only the components present in that directory. If you change the installation directory, pass that directory again on future installer runs or configure `installation.directory`; the installer does not use local registration to choose its destination.
-
-For local-only cleanup, load the helper above and run `Disable-StackProfileLoader`, then open a new window. This keeps the shared bootstrap for other PCs and does not remove software or stop a running TTS service. See [Disable command loading on one PC](../README.md#disable-command-loading-on-one-pc).
-
-Older versions wrote separate agent and TTS blocks with absolute paths. Registration migrates these blocks and creates backups when changing files. If it reports incomplete, nested or duplicate markers, inspect the marked sections and their backups before retrying; the helper leaves both registration files unchanged when marker validation fails.
-
-An absolute path in an old loader is not, by itself, proof of a startup error: the old loaders checked whether their target script existed. Capture the exact PowerShell error before attributing a failure to profile sync. If script execution is blocked, review [PowerShell scripts are disabled](#powershell-scripts-are-disabled); execution policy is specific to each machine.
+A missing local installation now produces an error only when a stack command is invoked. The second PC should remain free of stack startup code when the stack has never been registered there.
 
 ### PyTorch fails to load `c10.dll`
 
@@ -133,15 +95,7 @@ Check the command registration:
 Get-Command tts-start,tts-stop,tts-status,tts-say
 ```
 
-If commands are missing, check the current PowerShell profile and execution policy:
-
-```powershell
-Get-Content $PROFILE.CurrentUserCurrentHost
-```
-
-```powershell
-Get-ExecutionPolicy -List
-```
+If commands are missing, follow [Missing stack commands](#missing-stack-commands) above.
 
 ### CUDA is unavailable
 
@@ -167,13 +121,7 @@ Open a new PowerShell window and check:
 Get-Command agent,agentdo,localagent,localagentdo
 ```
 
-Check your profile configuration:
-
-```powershell
-Get-Content $PROFILE.CurrentUserCurrentHost
-```
-
-If script execution is blocked, review [PowerShell scripts are disabled](#powershell-scripts-are-disabled).
+Follow [Missing stack commands](#missing-stack-commands) above to inspect the local executable registration and PATH.
 
 ### Perth watermarking fails during TTS startup
 

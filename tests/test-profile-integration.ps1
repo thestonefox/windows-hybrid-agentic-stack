@@ -1,6 +1,6 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
-# Runs the real profile registration, root installer orchestration and
+# Runs real executable registration, root installer orchestration and
 # command wrappers against a disposable copy. Dependency installation,
 # prerequisites, inference, HTTP and audio generation are mocked.
 [CmdletBinding()]
@@ -11,7 +11,10 @@ $sourceRoot = Split-Path -Parent $PSScriptRoot
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
     'whas-integration-tests-' + [guid]::NewGuid().ToString('N'))
 $originalLocal = $env:LOCALAPPDATA
+$originalUserProfile = $env:USERPROFILE
 $originalProfile = $PROFILE
+$originalPath = $env:Path
+$userPathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -27,36 +30,48 @@ function Write-Fixture {
 
 function Assert-Runtime {
     param([string]$ExpectedRoot, [int]$Count)
-    & {
-        $Error.Clear()
-        . $PROFILE.CurrentUserCurrentHost
-        $commands = @(Get-Command agent,agentdo,localagent,localagentdo,
-            tts-start,tts-stop,tts-status,tts-say,tts-voice-list,
-            tts-voice-add,tts-voice-remove,tts-voice-test -ErrorAction Ignore)
-        Assert-True ($commands.Count -eq $Count) 'Real command functions registered'
-        Assert-True ($Error.Count -eq 0) 'Real scripts load without startup errors'
-        if ($Count -eq 12) {
-            Assert-True ($script:AgentStackInstallPath -ceq $ExpectedRoot) 'Agent uses selected root'
-            agent --help
-        }
-        Assert-True ($script:TtsRoot -ceq $ExpectedRoot) 'TTS uses selected root'
-        Assert-True ($script:TtsPython -ceq (Join-Path $ExpectedRoot '.venv\Scripts\python.exe')) 'TTS Python path'
-        tts-voice-list
+    $bin = Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack\bin'
+    $commands = @(Get-Command agent,agentdo,localagent,localagentdo,
+        tts-start,tts-stop,tts-status,tts-say,tts-voice-list,
+        tts-voice-add,tts-voice-remove,tts-voice-test -CommandType Application)
+    Assert-True (@($commands | Select-Object -ExpandProperty Name -Unique).Count -eq 12) 'Native command entry points registered'
+    Assert-True ([IO.File]::ReadAllText((Join-Path $bin 'install-root.txt')) -ceq $ExpectedRoot) 'Selected root registered locally'
+    if ($Count -eq 12) {
+        & (Join-Path $bin 'agent.exe') --help
+        Assert-True ($LASTEXITCODE -eq 0) 'Real agent help works'
     }
+    & (Join-Path $bin 'tts-voice-list.exe')
+    Assert-True ($LASTEXITCODE -eq 0) 'Real TTS wrapper loads'
+    Assert-True (-not (Test-Path -LiteralPath $PROFILE.CurrentUserCurrentHost)) 'No shared profile created'
 }
-
 try {
     Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
     Write-Host "Test files: $testRoot"
     $fixtureRepo = Join-Path $testRoot 'repository'
     foreach ($relative in @('install.ps1', 'scripts\install-agent-commands.ps1',
-        'scripts\profile-loader.ps1', 'scripts\config.ps1', 'scripts\agent-commands.ps1',
+        'scripts\command-registration.ps1', 'scripts\command-host.cs', 'scripts\configuration.ps1', 'scripts\profile-loader.ps1', 'scripts\config.ps1', 'scripts\agent-commands.ps1',
         'config\defaults.json', 'tts\tts.ps1', 'tts\tts_service.py')) {
         $destination = Join-Path $fixtureRepo $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $sourceRoot $relative) -Destination $destination
     }
     Write-Fixture (Join-Path $fixtureRepo 'scripts\check-prerequisites.ps1') 'exit 0'
+    $configEntry = Join-Path $fixtureRepo 'scripts\config.ps1'
+    $overridePath = Join-Path $testRoot 'partial-config.json'
+    Write-Fixture $overridePath '{"agents":{"cloud":{"model":"openai/test-model"}}}'
+    $effective = (& $configEntry -Show -ConfigPath $overridePath | Out-String) | ConvertFrom-Json
+    Assert-True ($LASTEXITCODE -eq 0 -and $effective.agents.cloud.model -eq 'openai/test-model') 'Partial configuration merges'
+    Assert-True ($effective.tts.port -gt 0) 'Partial configuration retains defaults'
+    Write-Fixture $overridePath '{"unknownSetting":42}'
+    & $configEntry -Validate -ConfigPath $overridePath
+    Assert-True ($LASTEXITCODE -eq 1) 'Unknown configuration rejected'
+    $initPath = Join-Path $testRoot 'initialised-config.json'
+    & $configEntry -Init -ConfigPath $initPath
+    Assert-True ($LASTEXITCODE -eq 0) 'Config Init succeeds'
+    $initHash = (Get-FileHash -LiteralPath $initPath).Hash
+    & $configEntry -Init -ConfigPath $initPath
+    Assert-True ($LASTEXITCODE -eq 1 -and (Get-FileHash -LiteralPath $initPath).Hash -ceq $initHash) 'Config Init refuses overwrite'
+    Write-Host 'PASS: Shared configuration loader merges defaults, rejects unknown keys and preserves existing config'
     Write-Fixture (Join-Path $fixtureRepo 'scripts\setup-agents.ps1') @'
 param([switch]$Cloud, [switch]$Local, [string]$InstallPath,
     [string]$CloudModel, [string]$LocalModel, [int]$LocalContextSize)
@@ -80,62 +95,56 @@ exit 0
     $machineA = Join-Path $testRoot 'machine-a\LocalAppData'
     $machineB = Join-Path $testRoot 'machine-b\LocalAppData'
     $env:LOCALAPPDATA = $machineA
+    $env:USERPROFILE = $machineA
     $rootA = Join-Path $testRoot ("Custom A's [stack] " + [char]0x00e9)
     $rootB = Join-Path $testRoot 'Different B\Stack'
     $entryPoint = Join-Path $fixtureRepo 'install.ps1'
-    Write-Fixture $profilePath ''
 
-    # Keep installer questions and policy handling isolated in this process.
+
+    # Keep installer questions isolated; a policy mutation is always a failure.
     function Read-Host { 'y' }
-    function Get-ExecutionPolicy {
-        param([switch]$List)
-        if ($List) {
-            foreach ($scope in @('MachinePolicy', 'UserPolicy', 'CurrentUser', 'LocalMachine')) {
-                [pscustomobject]@{ Scope = $scope; ExecutionPolicy = $(
-                    if ($scope -eq 'CurrentUser') { 'RemoteSigned' } else { 'Undefined' }) }
-            }
-        }
-        else { 'RemoteSigned' }
-    }
     function Set-ExecutionPolicy { throw 'Tests must not change execution policy.' }
     function Start-Process { throw 'Tests must not start a service.' }
 
-    & $entryPoint -Voice -InstallPath $rootA
+    & $entryPoint -PersistCommandPath $false -Voice -InstallPath $rootA
     Assert-True ($LASTEXITCODE -eq 0) 'Root installer voice-only succeeds'
     Assert-Runtime $rootA 8
     Write-Host 'PASS: Voice-only installer registers real TTS commands at a custom root'
 
-    $syncedBefore = [System.IO.File]::ReadAllText($profilePath)
-    & $entryPoint -Cloud -InstallPath $rootA
+
+    & $entryPoint -PersistCommandPath $false -Cloud -InstallPath $rootA
     Assert-True ($LASTEXITCODE -eq 0) 'Adding agents succeeds after voice-only'
     Assert-Runtime $rootA 12
-    Assert-True ([System.IO.File]::ReadAllText($profilePath) -ceq $syncedBefore) 'Adding agents preserves synced bootstrap'
-    Write-Host 'PASS: Agent installer reuses the same bootstrap; all 12 real commands load'
+    Assert-True (-not (Test-Path -LiteralPath $profilePath)) 'Adding agents creates no profile'
+    Write-Host 'PASS: Agent installer reuses the same registration; all 12 real commands load'
 
-    $profileHash = (Get-FileHash -LiteralPath $profilePath).Hash
-    $localFile = Join-Path $machineA 'WindowsHybridAgenticStack\profile.ps1'
+
+    $localFile = Join-Path $machineA '.windows-hybrid-agentic-stack\commands.json'
     $localHash = (Get-FileHash -LiteralPath $localFile).Hash
-    & $entryPoint -Cloud -Voice -InstallPath $rootA
+    & $entryPoint -PersistCommandPath $false -Cloud -Voice -InstallPath $rootA
     Assert-True ($LASTEXITCODE -eq 0) 'Repeat combined installation succeeds'
-    Assert-True ((Get-FileHash -LiteralPath $profilePath).Hash -ceq $profileHash) 'Repeat profile bytes unchanged'
+    Assert-True (-not (Test-Path -LiteralPath $profilePath)) 'Repeat profile bytes unchanged'
     Assert-True ((Get-FileHash -LiteralPath $localFile).Hash -ceq $localHash) 'Repeat local loader bytes unchanged'
     Assert-Runtime $rootA 12
     Write-Host 'PASS: Repeat combined installer leaves registration unchanged'
 
     $env:LOCALAPPDATA = $machineB
-    & $entryPoint -Cloud -Voice -InstallPath $rootB
+    $env:USERPROFILE = $machineB
+    & $entryPoint -PersistCommandPath $false -Cloud -Voice -InstallPath $rootB
     Assert-True ($LASTEXITCODE -eq 0) 'Second simulated machine installer succeeds'
     Assert-Runtime $rootB 12
-    Assert-True ((Get-FileHash -LiteralPath $profilePath).Hash -ceq $profileHash) 'Second machine preserves synced profile'
+    Assert-True (-not (Test-Path -LiteralPath $profilePath)) 'Second machine preserves synced profile'
     $env:LOCALAPPDATA = $machineA
+    $env:USERPROFILE = $machineA
     Assert-Runtime $rootA 12
-    Write-Host 'PASS: Same synced profile loads real scripts from each PC root'
+    Write-Host 'PASS: Separate local registrations select each simulated PC root without a profile'
 
     # Exercise lazy voice loading without starting Python or producing audio.
     # HTTP readiness is mocked, and WAV generation stops at the request boundary.
     & {
+        . (Join-Path $rootA 'scripts\configuration.ps1')
         . (Join-Path $rootA 'scripts\agent-commands.ps1') -InstallPath $rootA
-        Assert-True ($null -eq (Get-Command tts-say -ErrorAction Ignore)) 'TTS initially absent in lazy-load scope'
+        Assert-True ($null -eq (Get-Command tts-say -CommandType Function -ErrorAction Ignore)) 'TTS initially absent in lazy-load scope'
         function opencode {
             $global:LASTEXITCODE = 0
             '{"type":"text","part":{"text":"Paris"}}'
@@ -156,7 +165,8 @@ exit 0
     Write-Host 'PASS: Real agent -v lazily loads real TTS wrapper with explicit custom root'
 
     $env:LOCALAPPDATA = $machineA
-    & $entryPoint -Cloud -Voice -InstallPath $rootB
+    $env:USERPROFILE = $machineA
+    & $entryPoint -PersistCommandPath $false -Cloud -Voice -InstallPath $rootB
     Assert-True ($LASTEXITCODE -eq 0) 'Changing selected root succeeds'
     Assert-Runtime $rootB 12
     Write-Host 'PASS: Installer updates machine-local registration when selected root changes'
@@ -177,6 +187,9 @@ exit 0
 }
 finally {
     $env:LOCALAPPDATA = $originalLocal
+    $env:USERPROFILE = $originalUserProfile
     $PROFILE = $originalProfile
+    $env:Path = $originalPath
+    Assert-True ([Environment]::GetEnvironmentVariable('Path', 'User') -ceq $userPathBefore) 'Persistent user PATH unchanged'
     Write-Host "Retained test files: $testRoot"
 }

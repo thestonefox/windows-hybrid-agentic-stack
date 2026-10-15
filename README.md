@@ -4,7 +4,7 @@ A configurable Windows AI agent toolkit combining local language models, cloud A
 
 The project provides PowerShell commands for interacting with cloud and local AI agents, running agent-assisted tasks, and optionally speaking responses using Chatterbox Turbo.
 
-> **Development status:** This project is under active development. A full installation with the profile-sync changes passed on the reference Windows 11 machine, including fresh-session command loading, cloud/local inference, CUDA detection and speech generation. The user confirmed both spoken responses were audible. Actual OneDrive synchronisation between PCs remains unverified.
+> **Development status:** Native command registration passed a live Windows 11 installation test, fresh-terminal command discovery, cloud/local inference and CUDA speech, with both responses confirmed audible. Profiles and execution policies remained unchanged. Isolated Windows PowerShell 5.1 tests also pass under Restricted. Controlled rollback also passed: exact user PATH, profile state, policies and original model digests matched the baseline. The user also confirmed that a second physical PC starts PowerShell without profile errors.
 
 ## Features
 
@@ -361,21 +361,9 @@ The root installer passes the selected directory to individual components so the
 
 ## PowerShell execution policy
 
-Windows PowerShell may block script execution on systems with restrictive execution policies.
+Installed commands are native console applications built locally with Windows PowerShell 5.1's bundled compiler. They host the stack's PowerShell command code through Microsoft's [PowerShell hosting API](https://learn.microsoft.com/en-us/powershell/scripting/developer/hosting/adding-and-invoking-commands?view=powershell-7.2), without loading profiles or setting execution policies. Runtime tests pass with the caller's effective policy remaining Restricted. Enforced organisation policies are checked and restrictive settings cause an explicit error.
 
-For a temporary override in the current PowerShell session:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-```
-
-This change is temporary and does not permit automatic profile loading in later sessions.
-
-When installing agent commands, the installer may offer to configure `RemoteSigned` for the current user. It makes this change only after confirmation.
-
-The installer does not intentionally override machine-wide or Group Policy restrictions.
-
-Execution policies are not a security boundary. Only run scripts from sources you trust.
+The source installer and maintenance scripts are still `.ps1` files and require a context that permits running those scripts. The installer does not configure execution policy or offer to change it. An executable installer for a completely Restricted machine is not yet provided.
 
 ## Installation
 
@@ -451,71 +439,70 @@ Depending on the selected components, the installer:
 - Installs Chatterbox Turbo and its Python dependencies.
 - Verifies Python package compatibility and key package versions.
 - Copies TTS service and command files into the installation directory.
-- Registers TTS commands in the current user's PowerShell profile.
+- Registers native agent and TTS commands through the local user PATH.
 
 Repeat installations attempt to reuse existing installations and preserve unrelated PowerShell profile content.
 
 Changed installed files are backed up where supported.
 
-### PowerShell profiles shared between PCs
+### Machine-local command registration
 
-Agent and TTS commands use one marked bootstrap in the current user/current host PowerShell profile. The bootstrap looks for a machine-local loader at:
+Agent and TTS commands are executable files in:
 
 ```text
-%LOCALAPPDATA%\WindowsHybridAgenticStack\profile.ps1
+%USERPROFILE%\.windows-hybrid-agentic-stack\bin
 ```
 
-The local loader stores the selected installation directory and passes it explicitly to both command scripts. The shared profile contains no installation-specific path. A OneDrive-synchronised profile can therefore load installations in different directories on different PCs. On a PC without local registration, it does nothing; missing command scripts are also skipped.
+The installer adds this directory to the current user's local PATH. Open a new terminal application after installation so it inherits the updated environment. Existing terminal applications may retain the old PATH.
 
-Installing agents or voice uses the same registration helper. Repeat registration leaves unchanged files alone. Existing separate agent and TTS blocks are migrated to one bootstrap, with backups of changed files. Incomplete, nested or duplicate markers cause registration to stop for review before either registration file is written. Unrelated profile text is preserved.
+Registration lives outside AppData because packaged Windows applications can redirect AppData writes into their own private cache. The live test exposed this: the installer could see its executables while ordinary PowerShell could not. Keeping registration directly under the Windows user directory avoids that redirection; it also avoids a synced Documents profile. See Microsoft's [filesystem virtualization documentation](https://learn.microsoft.com/en-us/windows/msix/desktop/flexible-virtualization).
 
-The helper reads Unicode profiles and falls back to the Windows ANSI code page for files containing invalid UTF-8. Changed files are written as UTF-8 with a BOM for Windows PowerShell 5.1, while backups retain the original bytes.
+The adjacent `install-root.txt` selects the installation directory. `commands.json` records the executable hashes and whether registration added the user PATH entry. Repeat registration preserves unchanged files; changes to owned files receive backups. Unknown or modified executables are rejected instead of overwritten.
 
-Each PC has one active installation root. Selecting a different `-InstallPath` switches that PC's registration to the new root and loads the components present there. Components in the old root are not carried over automatically. The old installation and its files are retained; no automatic removal or relocation takes place. Continue to supply your custom path, or save it in `config/config.json`, when rerunning the installer: local registration does not override the installer's configured/default destination.
+Fresh installation creates no PowerShell profile. A PC without a local installation receives no stack startup code through OneDrive. Each PC has its own executable registration and selected installation root. A missing component reports an error only when its command is invoked.
 
-The bootstrap and loader still follow the machine's PowerShell execution policy. Profile synchronisation does not configure that policy on another PC.
+For upgrades, only legacy stack blocks marked `BEGIN/END WINDOWS HYBRID AGENTIC STACK` or `... STACK TTS` are removed from an existing profile. Original bytes are backed up. Unrelated text is preserved, and malformed markers stop migration. A profile containing only the removed blocks and whitespace is deleted instead of leaving an empty script that Restricted would still reject. Unrelated profiles can still produce their own startup errors under Restricted.
 
-### Disable command loading on one PC
+Each PC has one active root. Selecting another `-InstallPath` switches local registration and retains the previous installation. Continue specifying your custom path, or save it in `config/config.json`, when rerunning the installer; registration does not choose the installer's destination.
 
-From the repository root, load the helper:
+### Remove command registration on one PC
+
+Stop any running TTS service with `tts-stop`, then run from the repository root in a context permitted to run maintenance scripts:
 
 ```powershell
-. .\scripts\profile-loader.ps1
+. .\scripts\command-registration.ps1
+Unregister-StackCommands
 ```
 
-Then disable this PC's local loader:
+This removes recognised executable commands and the user PATH entry only if registration added it. Changed executables cause cleanup to stop for review. Installation files, models, backups and unrelated PATH entries are retained. This is not a full uninstaller.
+
+To register an existing compatible installation without reinstalling dependencies:
 
 ```powershell
-Disable-StackProfileLoader
+. .\scripts\command-registration.ps1
+Install-StackCommandRegistration -InstallPath 'D:\AI\AgentStack'
 ```
 
-This backs up an active local loader and replaces it with a harmless comment. It keeps the synced bootstrap so other PCs continue to work. Open a new PowerShell window to verify that the commands no longer load; functions already loaded in an existing session remain available until that session ends. Stop a running TTS service with `tts-stop` before disabling loading if you also want speech processing stopped.
+For a controlled fresh-install test, see [Installation test and rollback](docs/install-test-rollback.md). Capture a baseline before installation and review cleanup targets before removing anything.
 
-This operation does not uninstall software, remove the installation directory or models, or change execution policy. A full uninstaller is not yet provided. If installation files were removed separately, the bootstrap safely skips their missing command scripts.
+### Isolated command and installer tests
 
-For a controlled fresh-install test, see [Installation test and rollback](docs/install-test-rollback.md). Capture a baseline before installation and review the concrete cleanup targets before removing anything.
-
-To restore registration for an existing installation without reinstalling dependencies, load the helper above and run this example with your installation's actual directory:
+Run these in Windows PowerShell 5.1 from a context permitted to run test scripts:
 
 ```powershell
-Install-StackProfileLoader -InstallPath 'D:\AI\AgentStack'
+.\tests\test-command-registration.ps1
+.\tests\test-command-background.ps1
+.\tests\test-profile-loader.ps1
+.\tests\test-profile-integration.ps1
 ```
 
-### Isolated profile tests
+Tests use temporary directories and fixture profiles, retaining evidence at the printed paths. They leave the real user profile, persistent PATH and execution policies unchanged. Native command tests run children with Restricted policy and check arguments, voice confirmation, custom roots, repeat registration, simulated PCs and unregistering. Legacy migration tests check exact backups and unrelated profile preservation. Integration tests run real installer orchestration and wrappers with dependency installation, model setup, inference and audio mocked.
 
-From the repository root, run:
+The background-process test checks that a command returns and captured output reaches EOF while its service remains running. Native speech startup creates a hidden process with handle inheritance disabled; the Python service opens its own logs before loading dependencies.
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\test-profile-loader.ps1
-```
+`-PersistCommandPath $false` on the root installer, or `-PersistPath $false` on the registration helper, suppresses persistent PATH changes for isolated testing. Production installation uses the default `$true`.
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\test-profile-integration.ps1
-```
-
-These tests use fresh temporary directories and profiles, and retain the fixtures and backups at the printed paths. They do not modify the real user profile, install software or change persistent execution policy. The helper tests use stub commands. Integration tests run the real installer orchestration and command scripts in a temporary repository copy, with prerequisite checks, dependency installation, model setup, inference and HTTP/audio generation mocked.
-
-They cover empty profiles, unrelated profile text, repeated registration, custom paths, two simulated PCs sharing a profile, missing installations, legacy-block migration, local cleanup and explicit TTS path handling. They do not verify actual OneDrive synchronisation or replace a hardware speech/inference test.
+The native command path passed live installation, fresh-terminal discovery, cloud/local inference and audible CUDA speech on the reference PC. Live testing exposed and fixed AppData redirection and a background-service pipe inheritance issue. Controlled rollback of the revised installation passed all 90 checks, including exact PATH restoration, clean startup, removal of owned files and preservation of original model digests. The user also confirmed clean PowerShell startup without profile errors on a second physical PC.
 
 ### Chatterbox Python environment
 
@@ -531,7 +518,7 @@ It can also be run independently:
 .\tts\install-tts.ps1
 ```
 
-This component installer prepares TTS files and dependencies; use the root installer for automatic profile registration, or the registration helper above for an existing installation.
+This component installer prepares TTS files and dependencies; use the root installer for automatic executable registration, or the registration helper above for an existing installation.
 
 To prepare only the Python virtual environment:
 
@@ -657,7 +644,7 @@ localagent -v -l "What is 2 plus 2?"
 
 The command displays the OpenCode events and passes the final answer to Chatterbox.
 
-**With the new profile loader, cloud and local voice commands generated valid WAV files and completed playback on the reference machine. The user confirmed hearing both responses. Custom-path handling has also passed isolated tests with inference and audio generation mocked.**
+**Native cloud and local voice commands generated valid 24 kHz WAV files, completed playback and returned normally on the reference machine. The user confirmed hearing both responses. Earlier profile-registration tests are retained as historical results.**
 
 ### Agent permissions
 
@@ -782,7 +769,7 @@ See [Troubleshooting](docs/troubleshooting.md) for installation, PowerShell, Oll
 
 ## Testing status
 
-The project has been tested incrementally using Windows Sandbox and a reference Windows 11 machine. The latest full installation on 15 October 2026 used the new profile loader; isolated Windows PowerShell 5.1 tests additionally cover custom paths, missing installations and simulated PCs. Earlier Sandbox results retain their original context below.
+The project has been tested incrementally using Windows Sandbox and a reference Windows 11 machine. The full installation on 15 October 2026 used the previous profile loader. Subsequent physical-PC testing exposed Restricted-policy startup errors from a synced profile, so registration now uses local executable commands. The revised native registration subsequently passed live fresh-terminal discovery, cloud/local inference and audible CUDA speech. Four isolated Windows PowerShell 5.1 test suites cover registration, background process lifetime, legacy migration and installer orchestration. Earlier Sandbox results retain their original context below.
 
 | Feature | Status |
 |---|---|
@@ -793,11 +780,11 @@ The project has been tested incrementally using Windows Sandbox and a reference 
 | Python dependency compatibility | Passed |
 | Chatterbox Turbo import | Passed after installing Visual C++ Redistributable |
 | TTS PowerShell command registration | Passed |
-| TTS profile loader idempotence | Passed |
-| Agent-to-TTS integration | Passed with the new loader; user confirmed hearing both cloud and local responses |
+| Native executable registration idempotence | Passed in isolated tests |
+| Agent-to-TTS integration | Passed through native launchers; user confirmed hearing both cloud and local responses |
 | Full TTS model loading in 4 GB Sandbox | Failed due to insufficient committed memory |
 | Actual CPU speech generation | Not yet verified |
-| CUDA installation and speech generation | Passed with the new loader on a CUDA-capable NVIDIA GPU with PyTorch 2.6.0+cu126 |
+| CUDA installation and speech generation | Passed through native launchers on a CUDA-capable NVIDIA GPU with PyTorch 2.6.0+cu126 |
 | Cloud model authentication and inference | Passed in the latest reference-machine smoke test; installer does not verify authentication/inference |
 | Managed 16K Ollama model creation and selection | Passed in Windows Sandbox with Qwen3 8B |
 | Local agent executing `Get-Date` | Passed |
@@ -805,12 +792,16 @@ The project has been tested incrementally using Windows Sandbox and a reference 
 | Exact local-agent file contents | Passed |
 | Local read-only agent refusal and independent file absence | Passed |
 | Local-agent installation repeat run | Passed |
-| Synced bootstrap, custom roots, missing installations and local cleanup | Passed in isolated Windows PowerShell 5.1 helper tests |
-| Root/agent installer registration and all 12 real command functions | Passed in isolated Windows PowerShell 5.1 integration tests with dependency/model setup mocked |
+| Native commands under Restricted, custom roots, simulated PCs and cleanup | Passed in isolated Windows PowerShell 5.1 tests; persistent user PATH unchanged |
+| Root/agent installer registration and all 12 executable entry points | Passed in isolated Windows PowerShell 5.1 integration tests with dependency/model setup mocked |
 | Agent lazy TTS loading with custom root | Passed with real wrappers and mocked inference/HTTP/audio |
-| Actual OneDrive sync between physical PCs | Not yet verified |
+| Second-PC PowerShell startup after the redesign | Passed: user confirmed no profile errors when opening a fresh window |
+| Previous profile sync between physical PCs | Matching profile hash confirmed; Restricted blocked startup, prompting the native registration redesign |
 | Full installation after profile-sync changes | Passed from an absent target; all 12 commands loaded in a fresh real-user session; original model digests and persistent policies unchanged |
-| Controlled real-install rollback | Passed: original profile bytes, backup inventory, four original model digests and persistent policies matched baseline; test installation/registration removed; fresh-session startup verified |
+| Live native command installation, fresh terminal and audible cloud/local voice | Passed after fixing AppData redirection and background pipe inheritance; profile absence, original models and policies preserved |
+| Native service launch with captured command output | Passed regression test and real voice startup; command returns while service remains running |
+| Controlled native-install rollback | Passed all 90 automatic checks: test files/registration/model removed; exact PATH, profile state, policies and original model digests restored; no TTS processes or startup commands remained |
+| Controlled real-install rollback (previous profile design) | Passed: original profile bytes, backup inventory, four original model digests and persistent policies matched baseline; test installation/registration removed; fresh-session startup verified |
 
 Passing the installation and import checks does not mean speech generation has been fully validated.
 
@@ -820,7 +811,7 @@ Development is carried out incrementally, with changes tested in Windows Sandbox
 
 The project uses [Conventional Commits](https://www.conventionalcommits.org/) with scoped commit messages.
 
-Future work includes testing actual profile synchronisation between PCs and full uninstallation support.
+Future work includes an executable installer for Restricted machines and full uninstallation support.
 
 ## License
 

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
 <#
 .SYNOPSIS
@@ -6,19 +6,19 @@
 
 .DESCRIPTION
     Copies the agent command runtime into the installation folder.
-    Registers a loader in the current user's PowerShell profile.
+    Registers native command launchers through the machine-local user PATH.
 
     Preserves existing files, backs up changes and avoids duplicate
-    profile entries.
+    command registration.
 
-    Offers to enable CurrentUser RemoteSigned when a normal
-    Windows PowerShell session would otherwise block the profile.
+    Does not create profiles or change execution policies.
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$InstallPath
+    [string]$InstallPath,
+    [bool]$PersistPath = $true
 )
 
 $ErrorActionPreference = 'Stop'
@@ -79,183 +79,8 @@ function Copy-StackFile {
     Write-Host "Installed: $Destination"
 }
 
-function Confirm-Action {
-    param([string]$Question)
-
-    while ($true) {
-        $answer = Read-Host "$Question [y/N]"
-
-        if ([string]::IsNullOrWhiteSpace($answer)) {
-            return $false
-        }
-
-        switch ($answer.Trim().ToLowerInvariant()) {
-            'y'   { return $true }
-            'yes' { return $true }
-            'n'   { return $false }
-            'no'  { return $false }
-            default {
-                Write-Host 'Enter Y or N.' -ForegroundColor Yellow
-            }
-        }
-    }
-}
-
-function Test-PolicyAllowsProfile {
-    param([string]$Policy)
-
-    return $Policy -in @(
-        'RemoteSigned',
-        'Unrestricted',
-        'Bypass'
-    )
-}
-
-function Configure-ProfileExecutionPolicy {
-    Write-Host ''
-    Write-Host 'Checking PowerShell profile execution policy...'
-
-    $policies = Get-ExecutionPolicy -List
-
-    $machinePolicy = [string](
-        $policies |
-            Where-Object Scope -eq 'MachinePolicy'
-    ).ExecutionPolicy
-
-    $userPolicy = [string](
-        $policies |
-            Where-Object Scope -eq 'UserPolicy'
-    ).ExecutionPolicy
-
-    $currentUserPolicy = [string](
-        $policies |
-            Where-Object Scope -eq 'CurrentUser'
-    ).ExecutionPolicy
-
-    $localMachinePolicy = [string](
-        $policies |
-            Where-Object Scope -eq 'LocalMachine'
-    ).ExecutionPolicy
-
-    # MachinePolicy and UserPolicy are enforced by Group Policy.
-    # The installer must never attempt to override them.
-    $enforcedPolicy = $null
-
-    if ($machinePolicy -ne 'Undefined') {
-        $enforcedPolicy = $machinePolicy
-    }
-    elseif ($userPolicy -ne 'Undefined') {
-        $enforcedPolicy = $userPolicy
-    }
-
-    if ($null -ne $enforcedPolicy) {
-        if (Test-PolicyAllowsProfile -Policy $enforcedPolicy) {
-            Write-Host "Group Policy permits profiles: $enforcedPolicy"
-        }
-        else {
-            Write-Warning (
-                "Group Policy may block the PowerShell profile: " +
-                $enforcedPolicy
-            )
-
-            Write-Host (
-                'Contact your administrator to change the policy.'
-            )
-        }
-
-        return
-    }
-
-    # Process scope is intentionally ignored here.
-    # A process-level Bypass used by the installer does not
-    # persist into an ordinary new PowerShell window.
-    $persistentPolicy = if (
-        $currentUserPolicy -ne 'Undefined'
-    ) {
-        $currentUserPolicy
-    }
-    elseif ($localMachinePolicy -ne 'Undefined') {
-        $localMachinePolicy
-    }
-    else {
-        'Restricted'
-    }
-
-    if (Test-PolicyAllowsProfile -Policy $persistentPolicy) {
-        Write-Host "Profile execution permitted: $persistentPolicy" `
-            -ForegroundColor Green
-        return
-    }
-
-    Write-Host ''
-    Write-Host "Persistent execution policy: $persistentPolicy"
-    Write-Host ''
-    Write-Host (
-        'New PowerShell windows may not automatically load ' +
-        'the agent commands.'
-    )
-    Write-Host ''
-    Write-Host 'Recommended setting: RemoteSigned (CurrentUser)'
-    Write-Host ''
-    Write-Host (
-        'This permits locally created scripts to run and ' +
-        'requires downloaded scripts to be signed or unblocked.'
-    )
-    Write-Host (
-        'It affects only your Windows user account, not ' +
-        'the machine-wide execution policy.'
-    )
-    Write-Host ''
-
-    if (-not (Confirm-Action `
-        -Question 'Set CurrentUser execution policy to RemoteSigned?')) {
-        Write-Warning (
-            'Execution policy unchanged. The agent commands may ' +
-            'not load automatically in new PowerShell windows.'
-        )
-        return
-    }
-
-    try {
-        Set-ExecutionPolicy `
-            -Scope CurrentUser `
-            -ExecutionPolicy RemoteSigned `
-            -Force `
-            -ErrorAction Stop
-    }
-    catch {
-        Write-Warning (
-            'Unable to change CurrentUser execution policy: ' +
-            $_.Exception.Message
-        )
-        return
-    }
-
-    $updatedPolicy = [string](
-        Get-ExecutionPolicy -List |
-            Where-Object Scope -eq 'CurrentUser'
-    ).ExecutionPolicy
-
-    if ($updatedPolicy -ne 'RemoteSigned') {
-        Write-Warning (
-            'CurrentUser execution policy could not be verified.'
-        )
-        return
-    }
-
-    Write-Host ''
-    Write-Host 'CurrentUser execution policy is now RemoteSigned.' `
-        -ForegroundColor Green
-
-    Write-Host (
-        'Open a new Windows PowerShell window to verify ' +
-        'automatic profile loading.'
-    )
-}
-
 try {
-    $profileHelper = Join-Path $PSScriptRoot 'profile-loader.ps1'
-    . $profileHelper
+    . (Join-Path $PSScriptRoot 'command-registration.ps1')
 
     if ([string]::IsNullOrWhiteSpace($InstallPath)) {
         throw 'InstallPath cannot be empty.'
@@ -273,6 +98,10 @@ try {
     $runtimeConfig = Join-Path $InstallPath 'config'
 
     $files = @(
+        @{
+            Source = Join-Path $repoRoot 'scripts\configuration.ps1'
+            Destination = Join-Path $runtimeScripts 'configuration.ps1'
+        },
         @{
             Source = Join-Path $repoRoot 'scripts\agent-commands.ps1'
             Destination = Join-Path $runtimeScripts 'agent-commands.ps1'
@@ -308,17 +137,15 @@ try {
             -Destination $userConfigDestination
     }
 
-    Install-StackProfileLoader -InstallPath $InstallPath
-    $profilePath = $PROFILE.CurrentUserCurrentHost
-
-    Configure-ProfileExecutionPolicy
-
+    Install-StackCommandRegistration -InstallPath $InstallPath -PersistPath $PersistPath
+    . (Join-Path $PSScriptRoot 'profile-loader.ps1')
+    Remove-StackLegacyProfileLoader
     Write-Host ''
     Write-Host 'PowerShell agent commands installed.' `
         -ForegroundColor Green
 
     Write-Host 'Commands: agent, agentdo, localagent, localagentdo'
-    Write-Host "Profile:  $profilePath"
+    Write-Host "Location: $env:USERPROFILE\.windows-hybrid-agentic-stack\bin"
 
     exit 0
 }

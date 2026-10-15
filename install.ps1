@@ -32,7 +32,8 @@ param(
     [switch]$Cloud,
     [switch]$Local,
     [switch]$Voice,
-    [string]$InstallPath
+    [string]$InstallPath,
+    [bool]$PersistCommandPath = $true
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,7 +45,7 @@ $prerequisiteScript = Join-Path $repoRoot 'scripts\check-prerequisites.ps1'
 $agentSetupScript = Join-Path $repoRoot 'scripts\setup-agents.ps1'
 $commandInstallScript = Join-Path $repoRoot 'scripts\install-agent-commands.ps1'
 $ttsInstallScript = Join-Path $repoRoot 'tts\install-tts.ps1'
-$profileHelper = Join-Path $repoRoot 'scripts\profile-loader.ps1'
+$registrationHelper = Join-Path $repoRoot 'scripts\command-registration.ps1'
 
 function Read-YesNo {
     param(
@@ -126,7 +127,10 @@ try {
     Write-Host '============================'
     Write-Host ''
 
-    foreach ($file in @($configScript, $prerequisiteScript, $profileHelper)) {
+    foreach ($file in @($configScript, $prerequisiteScript, $registrationHelper,
+        (Join-Path $repoRoot 'scripts\command-host.cs'),
+        (Join-Path $repoRoot 'scripts\configuration.ps1'),
+        (Join-Path $repoRoot 'scripts\profile-loader.ps1'))) {
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
             throw "Required project script missing: $file"
         }
@@ -289,7 +293,7 @@ try {
         Write-Host 'Installing PowerShell agent commands...'
         Write-Host ''
 
-        & $commandInstallScript -InstallPath $InstallPath
+        & $commandInstallScript -InstallPath $InstallPath -PersistPath $PersistCommandPath
 
         if ($LASTEXITCODE -ne 0) {
             throw 'PowerShell agent command installation failed.'
@@ -320,8 +324,10 @@ try {
             -Source (Join-Path $repoRoot 'config\config.json') `
             -Destination (Join-Path $InstallPath 'config\config.json')
 
-        . $profileHelper
-        Install-StackProfileLoader -InstallPath $InstallPath
+        . $registrationHelper
+        Install-StackCommandRegistration -InstallPath $InstallPath -PersistPath $PersistCommandPath
+        . (Join-Path $repoRoot 'scripts\profile-loader.ps1')
+        Remove-StackLegacyProfileLoader
     }
 
         # Runtime agent commands read the installed configuration.

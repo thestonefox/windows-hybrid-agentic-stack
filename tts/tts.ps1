@@ -24,7 +24,9 @@ param(
     [string]$InstallPath
 )
 
-$script:TtsStackRoot = Split-Path -Parent $PSScriptRoot
+$script:TtsStackRoot = if ([string]::IsNullOrWhiteSpace($InstallPath)) {
+    Split-Path -Parent $PSScriptRoot
+} else { $InstallPath }
 
 function Get-TtsConfiguration {
     $settings = @{
@@ -248,7 +250,8 @@ function tts-start {
         'AGENT_STACK_TTS_ROOT',
         'AGENT_STACK_TTS_PORT',
         'AGENT_STACK_TTS_IDLE_SECONDS',
-        'AGENT_STACK_TTS_DEVICE'
+        'AGENT_STACK_TTS_DEVICE',
+        'AGENT_STACK_TTS_OWN_LOGS'
     )
 
     $original = @{}
@@ -268,7 +271,13 @@ function tts-start {
         )
         $env:AGENT_STACK_TTS_DEVICE = $device
 
-        $process = Start-Process `
+        if ($null -ne ('WindowsHybridAgenticStack.CommandHost' -as [type])) {
+            $env:AGENT_STACK_TTS_OWN_LOGS = '1'
+            $servicePid = [WindowsHybridAgenticStack.CommandHost]::StartBackgroundProcess(
+                $script:TtsPython, ('-u "' + $script:TtsServiceFile + '"'), $script:TtsServiceDir)
+        }
+        else {
+            $process = Start-Process `
             -FilePath $script:TtsPython `
             -ArgumentList ('-u "' + $script:TtsServiceFile + '"') `
             -WorkingDirectory $script:TtsServiceDir `
@@ -281,12 +290,14 @@ function tts-start {
             ) `
             -PassThru `
             -ErrorAction Stop
+            $servicePid = $process.Id
+        }
 
         Set-Content `
             -LiteralPath $script:TtsPidFile `
-            -Value $process.Id
+            -Value $servicePid
 
-        Write-Host "Chatterbox starting (PID $($process.Id))."
+        Write-Host "Chatterbox starting (PID $servicePid)."
         Write-Host 'Run tts-status to check when it is ready.'
     }
     finally {

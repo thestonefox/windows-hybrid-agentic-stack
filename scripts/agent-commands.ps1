@@ -25,7 +25,9 @@ param(
     [string]$InstallPath
 )
 
-$script:AgentStackRepository = Split-Path -Parent $PSScriptRoot
+$script:AgentStackRepository = if ([string]::IsNullOrWhiteSpace($InstallPath)) {
+    Split-Path -Parent $PSScriptRoot
+} else { $InstallPath }
 
 if ([string]::IsNullOrWhiteSpace($InstallPath)) {
     $InstallPath = Join-Path $HOME 'AI\WindowsHybridAgenticStack'
@@ -179,23 +181,11 @@ function Invoke-AgentStackTask {
         return
     }
 
-    $configScript = Join-Path `
-        $script:AgentStackRepository 'scripts\config.ps1'
-
-    if (-not (Test-Path -LiteralPath $configScript -PathType Leaf)) {
-        Write-Error "Configuration loader not found: $configScript"
-        return
-    }
-
-    $configJson = & $configScript -Show
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error 'Unable to load agent configuration.'
-        return
-    }
-
     try {
-        $config = ($configJson | Out-String) | ConvertFrom-Json
+        if ($null -eq (Get-Command Get-StackConfiguration -ErrorAction Ignore)) {
+            . (Join-Path $script:AgentStackRepository 'scripts\configuration.ps1')
+        }
+        $config = Get-StackConfiguration -Root $script:AgentStackRepository
     }
     catch {
         Write-Error "Invalid configuration: $($_.Exception.Message)"
@@ -239,7 +229,7 @@ function Invoke-AgentStackTask {
         # When voice support is already loaded, use it directly.
         # This also allows a mock tts-say function during tests.
         if ($null -eq (
-            Get-Command tts-say -ErrorAction SilentlyContinue
+            Get-Command tts-say -CommandType Function -ErrorAction SilentlyContinue
         )) {
             $ttsScript = Join-Path `
                 $script:AgentStackInstallPath 'tts\tts.ps1'
@@ -277,7 +267,7 @@ function Invoke-AgentStackTask {
         }
 
         if ($null -eq (
-            Get-Command tts-say -ErrorAction SilentlyContinue
+            Get-Command tts-say -CommandType Function -ErrorAction SilentlyContinue
         )) {
             Write-Error 'Chatterbox tts-say command is unavailable.'
             return

@@ -1,8 +1,7 @@
 #Requires -Version 5.1
 
-# Dot-source this file to manage profile registration. Loading it alone
+# Dot-source this file to remove legacy stack profile blocks. Loading it alone
 # does not change the profile, execution policy, or installed software.
-
 function Read-StackProfileFile {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -55,24 +54,9 @@ function Write-StackProfileFile {
     Write-Host "Updated registration: $Path"
 }
 
-function Get-StackProfileContent {
+function Remove-StackProfileContent {
     param([AllowEmptyString()][string]$Content)
 
-    $loader = @'
-# BEGIN WINDOWS HYBRID AGENTIC STACK
-if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-    $whasProfileFile = Join-Path $env:LOCALAPPDATA 'WindowsHybridAgenticStack\profile.ps1'
-    try {
-        if (Test-Path -LiteralPath $whasProfileFile -PathType Leaf) {
-            . $whasProfileFile
-        }
-    }
-    finally {
-        Remove-Variable whasProfileFile -ErrorAction SilentlyContinue
-    }
-}
-# END WINDOWS HYBRID AGENTIC STACK
-'@
 
     # Match complete marker lines: agent markers are prefixes of TTS
     # markers, so substring matching cannot safely distinguish them.
@@ -106,87 +90,34 @@ if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
         throw 'PowerShell profile contains an incomplete stack loader.'
     }
 
-    $newline = if ($Content.Contains("`r`n")) { "`r`n" } else { "`n" }
-    $loader = ($loader -replace "`r`n", "`n") -replace "`n", $newline
-    if ($ranges.Count -eq 0) {
-        $separator = if ($Content.Length -gt 0 -and -not $Content.EndsWith("`n")) {
-            $newline
-        }
-        else { '' }
-        return $Content + $separator + $loader + $newline
-    }
+    if ($ranges.Count -eq 0) { return $Content }
 
-    # Replace the first managed block, remove the other, and preserve all
+    # Remove only complete managed blocks and preserve all
     # text outside the marked blocks, including the original line endings.
     for ($i = $ranges.Count - 1; $i -ge 0; $i--) {
         $range = $ranges[$i]
-        $replacement = if ($i -eq 0) { $loader } else { '' }
-        $Content = $Content.Remove($range.Start, $range.Length).
-            Insert($range.Start, $replacement)
+        $Content = $Content.Remove($range.Start, $range.Length)
     }
     return $Content
 }
 
-function Install-StackProfileLoader {
+function Remove-StackLegacyProfileLoader {
     [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][string]$InstallPath,
-        [string]$ProfilePath = $PROFILE.CurrentUserCurrentHost,
-        [string]$LocalAppDataPath = $env:LOCALAPPDATA
-    )
+    param([string]$ProfilePath = $PROFILE.CurrentUserCurrentHost)
 
-    foreach ($value in @($InstallPath, $ProfilePath, $LocalAppDataPath)) {
-        if ([string]::IsNullOrWhiteSpace($value)) {
-            throw 'Installation, profile and local application data paths must not be empty.'
-        }
+    if (-not (Test-Path -LiteralPath $ProfilePath -PathType Leaf)) { return }
+    $before = Read-StackProfileFile -Path $ProfilePath
+    $after = Remove-StackProfileContent -Content $before
+    if ($before -ceq $after) { return }
+    if ([string]::IsNullOrWhiteSpace($after)) {
+        $backup = "$ProfilePath.bak.$([guid]::NewGuid().ToString('N'))"
+        Copy-Item -LiteralPath $ProfilePath -Destination $backup -ErrorAction Stop
+        # Leaving an empty .ps1 would still trigger Restricted startup errors.
+        Remove-Item -LiteralPath $ProfilePath -Force -ErrorAction Stop
+        Write-Host "Removed empty legacy stack profile; backup: $backup"
     }
-    $root = [Environment]::ExpandEnvironmentVariables($InstallPath)
-    if ($root -match '^\$HOME(?=[\\/]|$)') {
-        $root = $HOME + $root.Substring(5)
-    }
-    $root = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($root)
-    $localLoader = Join-Path $LocalAppDataPath 'WindowsHybridAgenticStack\profile.ps1'
-
-    $existing = ''
-    if (Test-Path -LiteralPath $ProfilePath) {
-        if (-not (Test-Path -LiteralPath $ProfilePath -PathType Leaf)) {
-            throw "PowerShell profile path is not a file: $ProfilePath"
-        }
-        $existing = Read-StackProfileFile -Path $ProfilePath
-    }
-    # Validate markers before writing either file.
-    $updated = Get-StackProfileContent -Content $existing
-
-    $runtime = @'
-# Windows Hybrid Agentic Stack machine-local registration.
-$whasInstallRoot = '__INSTALL_ROOT__'
-try {
-    foreach ($whasRelativeScript in @('scripts\agent-commands.ps1', 'tts\tts.ps1')) {
-        $whasCommandFile = Join-Path $whasInstallRoot $whasRelativeScript
-        if (Test-Path -LiteralPath $whasCommandFile -PathType Leaf) {
-            . $whasCommandFile -InstallPath $whasInstallRoot
-        }
-    }
-}
-finally {
-    Remove-Variable whasInstallRoot, whasRelativeScript, whasCommandFile -ErrorAction SilentlyContinue
-}
-'@
-    $runtime = $runtime.Replace('__INSTALL_ROOT__', $root.Replace("'", "''"))
-    Write-StackProfileFile -Path $localLoader -Content $runtime
-    Write-StackProfileFile -Path $ProfilePath -Content $updated
-}
-
-function Disable-StackProfileLoader {
-    [CmdletBinding()]
-    param([string]$LocalAppDataPath = $env:LOCALAPPDATA)
-
-    if ([string]::IsNullOrWhiteSpace($LocalAppDataPath)) {
-        throw 'Local application data path must not be empty.'
-    }
-    $localLoader = Join-Path $LocalAppDataPath 'WindowsHybridAgenticStack\profile.ps1'
-    if (Test-Path -LiteralPath $localLoader) {
-        # Leave the synced bootstrap intact for installations on other PCs.
-        Write-StackProfileFile -Path $localLoader -Content '# Stack command loading is disabled on this PC.'
+    else {
+        Write-StackProfileFile -Path $ProfilePath -Content $after
+        Write-Host 'Removed legacy stack profile blocks; unrelated code preserved.'
     }
 }
