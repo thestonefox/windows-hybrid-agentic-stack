@@ -171,7 +171,7 @@ try {
         Write-Host ''
 
         $Cloud = Read-YesNo `
-            -Question 'Cloud agents (OpenCode + OpenAI)?' `
+            -Question 'Cloud agents (OpenCode provider of your choice)?' `
             -Default ([bool]$config.agents.cloud.enabled)
 
         $Local = Read-YesNo `
@@ -233,7 +233,7 @@ try {
     Write-Host "Voice output: $Voice"
 
     if ($Cloud) {
-        Write-Host "Cloud model:  $($config.agents.cloud.model)"
+        Write-Host ('Cloud model:  ' + $(if ($config.agents.cloud.model) { $config.agents.cloud.model } else { 'OpenCode default' }))
     }
 
     if ($Local) {
@@ -294,11 +294,15 @@ try {
         Write-Host 'Configuring OpenCode agents...'
         Write-Host ''
 
+        $setupCloudModel = [string]$config.agents.cloud.model
+        if ($setupCloudModel -and $setupCloudModel -notmatch '/') {
+            $setupCloudModel = "$($config.agents.cloud.provider)/$setupCloudModel"
+        }
         $setupArguments = @{
             Cloud = [bool]$Cloud
             Local = [bool]$Local
             InstallPath = $InstallPath
-            CloudModel = [string]$config.agents.cloud.model
+            CloudModel = $setupCloudModel
             LocalModel = [string]$config.agents.local.model
             LocalContextSize = [int]$config.agents.local.contextSize
         }

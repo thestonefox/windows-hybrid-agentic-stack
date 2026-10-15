@@ -22,7 +22,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$InstallPath,
 
-    [string]$CloudModel = 'openai/gpt-6-luna',
+    [string]$CloudModel,
     [string]$LocalModel = 'qwen3:8b',
     [ValidateRange(4096, 131072)]
     [int]$LocalContextSize = 16384
@@ -436,25 +436,13 @@ try {
             -SourceModel $LocalModel -ContextSize $LocalContextSize
     }
 
-    # Select the default model.
-    if ($Cloud) {
+    # Local commands select their model per invocation. Only an explicit
+    # cloud override may change the stack-specific OpenCode default.
+    if ($Cloud -and -not [string]::IsNullOrWhiteSpace($CloudModel)) {
         Set-JsonProperty `
             -Object $config `
             -Name 'model' `
             -Value $CloudModel
-    }
-    elseif ($Local) {
-        $currentModel = $config.PSObject.Properties['model']
-
-        if ($null -eq $currentModel -or
-            [string]::IsNullOrWhiteSpace(
-                [string]$currentModel.Value
-            )) {
-            Set-JsonProperty `
-                -Object $config `
-                -Name 'model' `
-                -Value "ollama/$configuredLocalModel"
-        }
     }
 
     # Add the Ollama provider without removing existing models.

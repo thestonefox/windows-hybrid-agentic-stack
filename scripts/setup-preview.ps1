@@ -37,7 +37,7 @@ if ($ShowPlan) {
     Write-Host "Cloud agents: $Cloud"
     Write-Host "Local agents: $Local"
     Write-Host "Voice output: $Voice"
-    if ($Cloud) { Write-Host "Cloud model:  $($config.agents.cloud.model)" }
+    if ($Cloud) { Write-Host ('Cloud model:  ' + $(if ($config.agents.cloud.model) { $config.agents.cloud.model } else { 'OpenCode default' })) }
     if ($Local) {
         Write-Host "Local model:  $($config.agents.local.model)"
         Write-Host "Context:      $($config.agents.local.contextSize) tokens"

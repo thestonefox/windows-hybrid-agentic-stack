@@ -44,7 +44,7 @@ function Show-AgentHelp {
         'qwen3:8b'
     }
     else {
-        'openai/gpt-6-luna'
+        'provider/model'
     }
 
     Write-Host ''
@@ -205,8 +205,18 @@ function Invoke-AgentStackTask {
         $model = $modelOverride
     }
 
-    if ($model -notmatch '/') {
+    if (-not [string]::IsNullOrWhiteSpace($model) -and $model -notmatch '/') {
+        if ([string]::IsNullOrWhiteSpace($provider)) {
+            Write-Error 'Use a fully qualified model: provider/model.'
+            return
+        }
         $model = "$provider/$model"
+    }
+
+    # Let OpenCode select its model unless a model was explicitly requested.
+    $modelArguments = @()
+    if (-not [string]::IsNullOrWhiteSpace($model)) {
+        $modelArguments = @('--model', $model)
     }
 
     $openCodeConfig = Join-Path `
@@ -304,7 +314,7 @@ function Invoke-AgentStackTask {
         if ($verboseOutput -and -not $voiceEnabled) {
             & opencode run `
                 --agent $agentName `
-                --model $model `
+                @modelArguments `
                 $prompt
 
             return
@@ -317,7 +327,7 @@ function Invoke-AgentStackTask {
 
         & opencode run `
             --agent $agentName `
-            --model $model `
+            @modelArguments `
             --format json `
             $prompt 2>&1 |
             ForEach-Object {

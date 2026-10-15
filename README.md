@@ -11,7 +11,7 @@ The project provides PowerShell commands for interacting with cloud and local AI
 The stack combines four components:
 
 - **Local AI — [Ollama](https://ollama.com/):** Run language models locally.
-- **Cloud AI — [OpenAI](https://openai.com/):** Access cloud-hosted AI models.
+- **Cloud AI — OpenCode providers:** Access your chosen cloud provider through OpenCode.
 - **Agent orchestration — [OpenCode](https://opencode.ai/):** Run AI agents with separate read-only and write-capable permissions.
 - **Text-to-speech — [Chatterbox](https://github.com/resemble-ai/chatterbox):** Generate speech locally, with support for custom voice profiles.
 
@@ -37,7 +37,7 @@ The project targets **Windows 10/11 and Windows PowerShell 5.1**.
 
 | Component | Requirements |
 |---|---|
-| Cloud agents | OpenCode and suitable OpenAI authentication |
+| Cloud agents | OpenCode and authentication for your chosen provider |
 | Local agents | OpenCode, Ollama, and a downloaded local model |
 | Text-to-speech | Python 3.11 (64-bit) and Microsoft Visual C++ Redistributable (x64) |
 | NVIDIA-accelerated TTS | Compatible NVIDIA GPU and driver |
@@ -167,9 +167,9 @@ ollama pull qwen3:8b
 
 You can configure another model in `config/config.json`. During local-agent installation, the installer creates a separate context-enabled variant of the selected Ollama model instead of modifying the source model. See [Local Ollama context size](#local-ollama-context-size).
 
-### 6. Configure OpenAI authentication (cloud agents only)
+### 6. Configure provider authentication (cloud agents only)
 
-Cloud agents use OpenCode to access OpenAI models.
+Cloud agents use the provider and model selected in OpenCode.
 
 Launch OpenCode:
 
@@ -179,11 +179,11 @@ opencode
 
 Follow its provider authentication instructions.
 
-You need access to the model selected in the stack configuration.
+Use `/connect` to connect your provider and `/models` to select an available model. Signing in alone does not guarantee a particular model selection.
 
-Model availability and billing depend on your OpenAI account and authentication method.
+Model availability and billing depend on your provider account and authentication method.
 
-The installer configures the model selection but does not authenticate your account or guarantee access to a particular cloud model.
+The installer leaves OpenCode model selection unchanged by default. It does not authenticate your account or guarantee model access.
 
 ### 7. NVIDIA GPU drivers (optional TTS acceleration)
 
@@ -295,6 +295,14 @@ For example:
 The configuration loader merges overrides with the built-in defaults.
 
 It validates settings and rejects unsupported or unknown values.
+
+### Cloud model selection
+
+`agent` and `agentdo` use OpenCode model selection by default: its configured model, then its last-used model, then its own fallback. The wrapper does not choose a provider based on login. `--model provider/model` overrides one invocation.
+
+For a persistent stack override, set `agents.cloud.model` to a fully qualified `provider/model` ID. The optional `agents.cloud.provider` supports shorter model names. Both default to `null`; local commands continue to select their configured Ollama model explicitly.
+
+Existing explicit stack settings are preserved. To inherit OpenCode selection, set `agents.cloud.model` to `null` in your stack configuration. Older installations may also have a `model` entry in the installation directory's `opencode.json`; remove that entry if it is the old stack default you no longer want. Reinstalling preserves existing model entries rather than guessing whether they are personal choices.
 
 ### Local Ollama context size
 

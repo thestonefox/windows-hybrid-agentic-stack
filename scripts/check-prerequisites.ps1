@@ -320,7 +320,7 @@ if ($Cloud -or $Local) {
 
 # Cloud model access cannot be fully verified without authentication.
 if ($Cloud) {
-    Add-Check 'OpenAI access' 'INFO' 'Authentication and model access must be verified during setup.' $false
+    Add-Check 'Cloud provider access' 'INFO' 'Authentication and model access must be verified during setup.' $false
 }
 
 # Ollama

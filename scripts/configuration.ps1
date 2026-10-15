@@ -67,6 +67,8 @@ function Assert-Configuration {
         foreach ($name in @('provider', 'model')) {
             $value = $agent.$name
 
+            if ($type -eq 'cloud' -and $null -eq $value) { continue }
+
             if ($value -isnot [string] -or
                 [string]::IsNullOrWhiteSpace($value)) {
                 $errors.Add(
@@ -74,6 +76,12 @@ function Assert-Configuration {
                 )
             }
         }
+    }
+
+    if ($Config.agents.cloud.model -is [string] -and
+        $Config.agents.cloud.model -notmatch '/' -and
+        [string]::IsNullOrWhiteSpace([string]$Config.agents.cloud.provider)) {
+        $errors.Add('agents.cloud.model must use provider/model when provider is null')
     }
 
     $contextSize = $Config.agents.local.contextSize
