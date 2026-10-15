@@ -171,6 +171,9 @@ function Start-StackInstallationTracking {
         $root.StartsWith($registration + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Installation and command registration must be separate directories.' }
     $tree = Get-StackInstallationTree -Root $root
     $state = Read-StackInstallationState -Root $root
+    # A completed uninstall ends the previous ownership session. Retained user
+    # files become the baseline for a new install, including a different engine.
+    if ($state -and $state.Status -eq 'Uninstalled') { $state = $null }
     if ($null -eq $state) {
         $state = [pscustomobject]@{
             SchemaVersion = 1; InstallationId = [guid]::NewGuid().ToString('N')

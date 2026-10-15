@@ -57,6 +57,8 @@ try {
     if ($null -eq $state) { throw 'Run the root installer so strategy resources are ownership-tracked.' }
     $existing = @($state.TtsStrategies | Where-Object { $_ -and $_.Id -eq $TtsEngine })
     if (@($state.TtsStrategies | Where-Object { $_ -and $_.Id -ne $TtsEngine }).Count) { throw 'Engine switching is not supported yet. Uninstall the current installation first.' }
+    $legacyChatterbox = -not $state.PreexistingVenv -and @($state.Files.Path | Where-Object { $_ -like '.venv/*' }).Count -gt 0
+    if (-not $existing.Count -and $legacyChatterbox -and $TtsEngine -ne 'chatterbox-turbo') { throw 'Uninstall the owned legacy Chatterbox installation before selecting a different engine.' }
     $environment = "tts/engines/$TtsEngine/.venv"
     $voices = "voices/$TtsEngine"
     if ($existing.Count) {
@@ -64,7 +66,7 @@ try {
         $environment = $existing[0].Context.EnvironmentPath
         $voices = $existing[0].Context.VoicesPath
     }
-    elseif ($TtsEngine -eq 'chatterbox-turbo' -and -not $state.PreexistingVenv -and @($state.Files.Path | Where-Object { $_ -like '.venv/*' }).Count) {
+    elseif ($TtsEngine -eq 'chatterbox-turbo' -and $legacyChatterbox) {
         $environment = '.venv'; $voices = 'voices'
     }
     $environmentPath = Resolve-TtsPackagePath $InstallPath $environment

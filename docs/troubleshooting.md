@@ -1,8 +1,32 @@
 # Troubleshooting
 
+## Piper TTS
+
+Select Piper with `install.ps1 -Voice -TtsEngine piper-tts` or standalone
+`--install --voice --tts-engine piper-tts`. The initial package supports CPU only;
+set `tts.device` to `cpu` or `auto`. An explicit CUDA setting is rejected.
+Both Python 3.11 x64 and the Visual C++ x64 runtime are required.
+The model downloader includes a pinned private CA bundle for fresh Windows
+installations while retaining the system's trusted roots and full HTTPS
+verification. No Windows certificate-store change is required.
+
+The Piper voice is `default` (also named `en_US-ljspeech-medium`). It is a
+pre-trained English voice. `tts-voice-add` and `tts-voice-remove` are reference-WAV
+cloning operations and are unsupported by this package.
+
+Dependency hash failures, unavailable pinned wheels or model SHA256 mismatches
+stop installation. Check network access to PyPI, files.pythonhosted.org and
+huggingface.co and retry. Do not remove hash checks or replace pinned assets
+with unrelated versions. Modified installed model files are preserved and
+rejected on repeat install. Use the main uninstaller and review its preservation
+receipt before reinstalling. Runtime paths are recorded in `tts/runtime.json`;
+the shared speech service writes diagnostics under the installation's `tts`
+directory. See [TTS strategy packages](tts-strategies.md) for the package notice
+and current limitations.
+
 ## PowerShell scripts are disabled
 
-Installed stack commands are native executables and require no PowerShell profile or execution-policy change. They host application command code internally, and isolated runtime tests pass under Restricted. Source installer and maintenance `.ps1` scripts still require a context permitted to run scripts; a native installer is not yet available. Enforced restrictive organisation policy causes the command host to stop with an administrator-policy message.
+Installed stack commands are native executables and require no PowerShell profile or execution-policy change. They host application command code internally, and isolated runtime tests pass under Restricted. Source installer and maintenance `.ps1` scripts still require a context permitted to run scripts; use the standalone setup EXE when policy blocks source scripts. Enforced restrictive organisation policy causes the command host to stop with an administrator-policy message.
 
 ### Missing stack commands
 

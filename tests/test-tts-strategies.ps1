@@ -21,6 +21,7 @@ function Write-Fixture([string]$Path,[string]$Text) {
     [IO.File]::WriteAllText($Path,$Text,(New-Object Text.UTF8Encoding($false)))
 }
 function Assert-True([bool]$Value,[string]$Message) { if (-not $Value) {throw "FAIL: $Message"}; Write-Host "PASS: $Message" }
+$bundledCount=@(Get-ChildItem -LiteralPath (Join-Path $source 'tts/strategies') -Directory).Count
 $fake=Join-Path $source 'tts/strategies/test-engine'
 $manifest=Get-Content -LiteralPath (Join-Path $repo 'tts/strategies/chatterbox-turbo/manifest.json') -Raw | ConvertFrom-Json
 $manifest.id='test-engine';$manifest.name='Test engine';$manifest.capabilities.voiceCloning=$false
@@ -54,7 +55,7 @@ exit 0
 '@
 . (Join-Path $repo 'tts/strategy-management.ps1')
 $packages=@(Get-TtsStrategies $source)
-Assert-True ($packages.Count -eq 2) 'Drop-in folder adds a second discovered engine without shared-code edits'
+Assert-True ($packages.Count -eq ($bundledCount+1) -and 'test-engine' -in $packages.Manifest.id) 'Drop-in folder adds another discovered engine without shared-code edits'
 $bad=Get-Content -LiteralPath (Join-Path $fake 'manifest.json') -Raw
 Write-Fixture (Join-Path $fake 'manifest.json') ($bad.Replace('"apiVersion":  1','"apiVersion":  99').Replace('"apiVersion": 1','"apiVersion": 99'))
 $rejected=$false;try {$null=Get-TtsStrategies $source}catch{$rejected=$true}
@@ -100,11 +101,16 @@ try {
     }
     & (Join-Path $source 'install.ps1') -Voice -TtsEngine test-engine -Yes -PersistCommandPath $false -InstallPath $install
     Assert-True ($LASTEXITCODE -eq 0) 'Repeat installation uses the same owned environment'
+    & (Join-Path $source 'install.ps1') -Voice -TtsEngine chatterbox-turbo -Yes -PersistCommandPath $false -InstallPath $install
+    $unchangedEngine=Get-Content -LiteralPath (Join-Path $install '.whas-installation.json') -Raw | ConvertFrom-Json
+    Assert-True ($LASTEXITCODE -ne 0 -and $unchangedEngine.TtsStrategies[0].Id -ceq 'test-engine' -and -not (Test-Path -LiteralPath (Join-Path $install 'tts/engines/chatterbox-turbo'))) 'Active engine replacement rejected before creating another environment'
     $legacy=Join-Path $fixture 'legacy-install'
     $legacySession=Start-StackInstallationTracking -InstallPath $legacy
     Write-Fixture (Join-Path $legacy '.venv/Scripts/python.exe') 'test-owned-runtime'
     Write-Fixture (Join-Path $legacy 'voices/personal.txt') 'preserve legacy voice'
     Complete-StackInstallationTracking -Session $legacySession -Succeeded $true
+    & (Join-Path $source 'install.ps1') -Voice -TtsEngine test-engine -Yes -PersistCommandPath $false -InstallPath $legacy
+    Assert-True ($LASTEXITCODE -ne 0 -and [IO.File]::ReadAllText((Join-Path $legacy '.venv/Scripts/python.exe')) -ceq 'test-owned-runtime' -and -not (Test-Path -LiteralPath (Join-Path $legacy 'tts/engines/test-engine'))) 'Owned legacy Chatterbox cannot be silently replaced by another strategy'
     Copy-Item -LiteralPath (Join-Path $fake 'install.ps1') -Destination (Join-Path $source 'tts/strategies/chatterbox-turbo/install.ps1') -Force
     & (Join-Path $source 'install.ps1') -Voice -TtsEngine chatterbox-turbo -Yes -PersistCommandPath $false -InstallPath $legacy
     $legacyState=Get-Content -LiteralPath (Join-Path $legacy '.whas-installation.json') -Raw | ConvertFrom-Json
@@ -120,6 +126,10 @@ try {
     $setupExe=Join-Path $fixture 'strategy-setup.exe'
     & (Join-Path $source 'scripts/build-setup.ps1') -OutputPath $setupExe
     Assert-True ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $setupExe)) 'Standalone build discovers drop-in package'
+    foreach ($bundled in @($packages | Where-Object { $_.Manifest.id -ne 'test-engine' })) {
+        $planText = (& $setupExe --plan --voice --tts-engine $bundled.Manifest.id | Out-String)
+        Assert-True ($LASTEXITCODE -eq 0 -and $planText.Contains($bundled.Manifest.id)) "Standalone catalog exposes bundled strategy: $($bundled.Manifest.id)"
+    }
     . (Join-Path $repo 'scripts/installation-state.ps1')
     . (Join-Path $repo 'scripts/command-registration.ps1')
     . (Join-Path $repo 'scripts/uninstall.ps1')
@@ -147,6 +157,11 @@ try {
     Assert-True (Test-Path -LiteralPath (Join-Path $install 'voices/test-engine/personal.txt')) 'Personal voice data preserved'
     $null=Get-StackUninstallPlan $install
     Assert-True $true 'Repeat preview works after removal with retained personal data'
+    & $setupExe --install --voice --tts-engine chatterbox-turbo --install-path $install --yes --no-path
+    $reinstalled=Get-Content -LiteralPath (Join-Path $install '.whas-installation.json') -Raw | ConvertFrom-Json
+    Assert-True ($LASTEXITCODE -eq 0 -and $reinstalled.TtsStrategies[0].Id -ceq 'chatterbox-turbo' -and [IO.File]::ReadAllText((Join-Path $install 'voices/test-engine/personal.txt')) -ceq 'preserve') 'Native engine selection after completed uninstall preserves retained personal voices'
+    & $setupExe --uninstall --install-path $install --apply --yes --no-path
+    Assert-True ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath (Join-Path $install 'voices/test-engine/personal.txt'))) 'Native cleanup after engine change preserves the original user data'
     $nativeInstall=Join-Path $fixture 'native-install'
     & $setupExe --install --voice --tts-engine test-engine --install-path $nativeInstall --yes --no-path
     Assert-True ($LASTEXITCODE -eq 0) 'Standalone EXE installs the bundled drop-in package after source removal'

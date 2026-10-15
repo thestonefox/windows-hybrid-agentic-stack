@@ -1,16 +1,36 @@
 # TTS strategy packages
 
-Only Chatterbox Turbo is bundled. Additional trusted packages can be placed in `tts/strategies/<id>/`; source setup discovers them and standalone setup embeds them at build time. Adding a folder beside an already-built EXE does not change that EXE. Rebuild it to include new packages.
+Chatterbox Turbo and Piper TTS are bundled. Additional trusted packages can be placed in `tts/strategies/<id>/`; source setup discovers them and standalone setup embeds them at build time. Adding a folder beside an already-built EXE does not change that EXE. Rebuild it to include new packages.
 
 ## Selecting an engine
 
 ```powershell
 .\install.ps1 -Voice -TtsEngine chatterbox-turbo
+.\install.ps1 -Voice -TtsEngine piper-tts
 ```
 
 The equivalent standalone options are `--install --voice --tts-engine chatterbox-turbo`. A selector requires the voice component. CLI selection overrides `tts.engine` in configuration. With no explicit selection, configuration wins; interactive setup offers discovered engines when no user configuration was supplied. With only the default engine, no extra menu is necessary. Unattended setup retains the configured/default engine and never asks an engine-selection question. Missing engines and unsupported devices fail instead of selecting a replacement.
 
 The current release supports one installed engine. Engine replacement and automatic package upgrades are deliberately rejected; uninstall the installation before selecting another engine. Ordinary repeat installation of an unchanged package is supported.
+
+This also applies to recognized legacy Chatterbox installations. After a completed uninstall, a directory retaining personal voices or other user files can be reused: a new ownership session preserves those surviving files as pre-existing data. Modified package/environment files that collide with a new installation still require review or a different installation directory.
+
+| Bundled strategy | Execution | Included voice | Reference-WAV cloning |
+|---|---|---|---|
+| `chatterbox-turbo` | CPU or CUDA | Chatterbox default | Supported |
+| `piper-tts` | CPU | LJ Speech medium, US English | Unsupported |
+
+Chatterbox remains the configured default. Interactive setup offers both engines; unattended setup uses the configured/default engine unless `-TtsEngine` / `--tts-engine` overrides it. Both packages currently require 64-bit Python 3.11 and the Visual C++ x64 runtime.
+
+## Piper package
+
+Piper uses `piper-tts` 1.8.0 and CPU ONNX Runtime in its own environment. Its Windows x64 / Python 3.11 dependency lock pins all eight runtime wheels by version and SHA256; setup installs binary wheels only and rejects unverified artifacts. It does not install PyTorch or GPU packages. The ONNX model, JSON configuration and upstream model card are pinned to a repository revision and individually hash-verified. They download directly into the strategy-owned model directory; inference needs no network or account. Repeat model preparation verifies existing assets and avoids downloading them again.
+
+Model HTTPS downloads retain the system's trusted roots and add a pinned private Certifi CA bundle for fresh Windows installations. Certificate and hostname verification remain enabled. Setup does not modify Windows certificate stores, profiles or execution policies.
+
+`default` and `en_US-ljspeech-medium` select the same pre-trained voice. `tts-voice-list` lists both. Reference-recording add/remove operations are unsupported, so Piper is not a voice-cloning substitute for Chatterbox. Other models, languages, arbitrary ONNX imports and GPU support are outside this first package.
+
+Piper's engine is GPL-3.0-or-later. The voice's upstream model card identifies its LJ Speech dataset as public domain; the exact model card is retained with the model rather than assigning it a different licence. Read [the package notice](../tts/strategies/piper-tts/NOTICE.md) for upstream source and licensing links. The setup EXE contains the adapter and download metadata; runtime wheels and voice weights are downloaded at install time.
 
 ## Package contents
 
@@ -57,6 +77,8 @@ After approval, the shared coordinator verifies and stops installation-owned spe
 
 Chatterbox has no external cleanup action; its hook reports that and leaves private-file removal to the coordinator. Personal voices, edited/unknown files, pre-existing resources and shared caches are preserved. Retained data can leave the installation directory present. Completed cleanup can be previewed again without requiring removed strategy files. This is scoped uninstall, not a whole-system rollback or a sandbox for arbitrary hook code.
 
+Piper uses the same cleanup contract. Its hook leaves removal of its private environment, voice model and package files to the ownership coordinator. It has no external service registration or model cache to remove. Engine-specific uninstall logic does not require edits to the main uninstaller.
+
 Ownership schema 1 remains readable. Upgrading a recognized, installer-owned legacy Chatterbox environment keeps its existing `.venv` and `voices` locations; environments are not relocated. An unowned legacy environment is not adopted or modified. Schema 2 records the installed strategy version, layout, package hashes and installation status. Never edit ownership hashes to force cleanup.
 
 ## Validation and private data
@@ -64,3 +86,5 @@ Ownership schema 1 remains readable. Upgrading a recognized, installer-owned leg
 `tests/test-tts-strategies.ps1` creates a disposable second strategy outside the repo to exercise source/EXE packaging, install dispatch, repeat installation, preview, hook rejection/failure, source-independent uninstall and voice preservation. `tests/test-tts-service.py` checks runtime dispatch and HTTP behavior without ML packages or playback. The existing installer, registration and uninstall suites remain regression coverage.
 
 Keep actual test results, recordings, models, compiled installers and local machine information outside the repo. Live speech and installation tests supplement the isolated checks; passing mock tests alone does not establish real synthesis compatibility for a new engine.
+
+`tests/test-piper-strategy.py` exercises pinned downloads, TLS verification, hash failure, safe repeat preparation, preservation of modified/partial files, download bounds and backend voice/device boundaries without network access or ML dependencies.
