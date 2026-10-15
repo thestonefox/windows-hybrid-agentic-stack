@@ -2,7 +2,7 @@
 
 <#
 .SYNOPSIS
-    Chatterbox Turbo commands for Windows Hybrid Agentic Stack.
+    TTS Turbo commands for Windows Hybrid Agentic Stack.
 
 .DESCRIPTION
     Automatically loads the configured installation directory.
@@ -35,6 +35,7 @@ function Get-TtsConfiguration {
         IdleMinutes = 10
         Device = 'auto'
         AutoStart = $true
+        Engine = 'chatterbox-turbo'
         DefaultVoice = 'default'
     }
 
@@ -62,6 +63,7 @@ function Get-TtsConfiguration {
         }
 
         if ($null -ne $config.tts) {
+            if ($config.tts.engine) { $settings.Engine = [string]$config.tts.engine }
             if ($null -ne $config.tts.port) {
                 $settings.Port = [int]$config.tts.port
             }
@@ -115,10 +117,22 @@ $script:TtsServiceFile = Join-Path $script:TtsServiceDir 'tts_service.py'
 $script:TtsPython = Join-Path $script:TtsRoot '.venv\Scripts\python.exe'
 $script:TtsPidFile = Join-Path $script:TtsServiceDir 'service.pid'
 $script:TtsVoiceDirectory = Join-Path $script:TtsRoot 'voices'
+$script:TtsRuntime = $null
+$runtimePath = Join-Path $script:TtsServiceDir 'runtime.json'
+if (Test-Path -LiteralPath $runtimePath) {
+    if (-not (Get-Command Resolve-TtsPackagePath -ErrorAction Ignore)) {
+        . (Join-Path $script:TtsServiceDir 'strategy-management.ps1')
+    }
+    $script:TtsRuntime = Get-Content -LiteralPath $runtimePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($script:TtsRuntime.schemaVersion -ne 1 -or $script:TtsRuntime.engine -cne $script:TtsSettings.Engine) { throw 'TTS runtime and configured engine differ; reinstall the selected engine.' }
+    $script:TtsPython = Join-Path (Resolve-TtsPackagePath $script:TtsRoot $script:TtsRuntime.environmentPath) 'Scripts/python.exe'
+    $script:TtsVoiceDirectory = Resolve-TtsPackagePath $script:TtsRoot $script:TtsRuntime.voicesPath
+}
 
 $script:TtsPort = $script:TtsSettings.Port
 $script:TtsIdleMinutes = $script:TtsSettings.IdleMinutes
 $script:TtsDevice = $script:TtsSettings.Device
+if ($script:TtsRuntime) { $script:TtsDevice = $script:TtsRuntime.device }
 $script:TtsAutoStart = $script:TtsSettings.AutoStart
 $script:TtsDefaultVoice = $script:TtsSettings.DefaultVoice
 
@@ -126,7 +140,7 @@ $script:TtsBaseUrl = "http://127.0.0.1:$script:TtsPort"
 
 function Get-TtsStatusResponse {
     try {
-        return Invoke-RestMethod `
+        $response = Invoke-RestMethod `
             -Uri "$script:TtsBaseUrl/status" `
             -TimeoutSec 2 `
             -ErrorAction Stop
@@ -134,6 +148,8 @@ function Get-TtsStatusResponse {
     catch {
         return $null
     }
+    if ($script:TtsRuntime -and ($response.engine -cne $script:TtsRuntime.engine -or $response.installation_root -ine $script:TtsRoot)) { throw 'Another service is using the configured speech port.' }
+    return $response
 }
 
 function Get-TtsServiceProcess {
@@ -162,7 +178,7 @@ function Get-TtsServiceProcess {
         return $null
     }
 
-    if ($processInfo.CommandLine -notlike '*tts_service.py*') {
+    if ($processInfo.ExecutablePath -ine $script:TtsPython -or -not $processInfo.CommandLine -or -not $processInfo.CommandLine.Contains(('"' + $script:TtsServiceFile + '"'))) {
         return $null
     }
 
@@ -180,7 +196,7 @@ function tts-status {
             'unknown'
         }
 
-        Write-Host 'Chatterbox: RUNNING'
+        Write-Host 'TTS: RUNNING'
         Write-Host "Address:     $script:TtsBaseUrl"
         Write-Host "Voice:       $voice"
         Write-Host "Idle limit:  $script:TtsIdleMinutes minutes"
@@ -188,34 +204,34 @@ function tts-status {
     }
 
     if ($null -ne (Get-TtsServiceProcess)) {
-        Write-Host 'Chatterbox: STARTING or still loading'
+        Write-Host 'TTS: STARTING or still loading'
         return
     }
 
-    Write-Host 'Chatterbox: STOPPED'
+    Write-Host 'TTS: STOPPED'
 }
 
 function tts-start {
     if ($null -ne (Get-TtsStatusResponse)) {
-        Write-Host 'Chatterbox is already running.'
+        Write-Host 'TTS is already running.'
         return
     }
 
     if ($null -ne (Get-TtsServiceProcess)) {
-        Write-Host 'Chatterbox is already starting.'
+        Write-Host 'TTS is already starting.'
         return
     }
 
     if (-not (Test-Path -LiteralPath $script:TtsPython -PathType Leaf)) {
         Write-Error (
-            'Chatterbox Python environment is not installed: ' +
+            'TTS Python environment is not installed: ' +
             $script:TtsPython
         )
         return
     }
 
     if (-not (Test-Path -LiteralPath $script:TtsServiceFile -PathType Leaf)) {
-        Write-Error "Chatterbox service not found: $script:TtsServiceFile"
+        Write-Error "TTS service not found: $script:TtsServiceFile"
         return
     }
 
@@ -297,7 +313,7 @@ function tts-start {
             -LiteralPath $script:TtsPidFile `
             -Value $servicePid
 
-        Write-Host "Chatterbox starting (PID $servicePid)."
+        Write-Host "TTS starting (PID $servicePid)."
         Write-Host 'Run tts-status to check when it is ready.'
     }
     finally {
@@ -315,7 +331,7 @@ function tts-stop {
     $process = Get-TtsServiceProcess
 
     if ($null -eq $process) {
-        Write-Host 'No matching Chatterbox process found.'
+        Write-Host 'No matching TTS process found.'
         return
     }
 
@@ -329,7 +345,7 @@ function tts-stop {
         -Force `
         -ErrorAction SilentlyContinue
 
-    Write-Host 'Chatterbox stopped.'
+    Write-Host 'TTS stopped.'
 }
 
 function Wait-TtsReady {
@@ -338,7 +354,7 @@ function Wait-TtsReady {
     }
 
     if (-not $script:TtsAutoStart) {
-        Write-Warning 'Chatterbox is stopped and autoStart is disabled.'
+        Write-Warning 'TTS is stopped and autoStart is disabled.'
         return $false
     }
 
@@ -361,7 +377,7 @@ function Wait-TtsReady {
     }
 
     Write-Warning (
-        'Chatterbox did not become ready. Check service-errors.log.'
+        'TTS did not become ready. Check service-errors.log.'
     )
 
     return $false
@@ -441,6 +457,7 @@ function tts-say {
     )
 
     if (-not (Wait-TtsReady)) {
+        Write-Error 'The selected speech engine is not ready.'
         return
     }
 
@@ -486,6 +503,15 @@ function tts-say {
 }
 
 function tts-voice-list {
+    if ($script:TtsRuntime) {
+        if (-not (Wait-TtsReady)) { Write-Error 'The selected speech engine is not ready.'; return }
+        try {
+            $response = Invoke-RestMethod -Uri "$script:TtsBaseUrl/voices" -TimeoutSec 10 -ErrorAction Stop
+            foreach ($name in $response.voices) { Write-Host $name }
+        }
+        catch { Write-Error "Could not list engine voices: $($_.Exception.Message)" }
+        return
+    }
     Write-Host 'default (built-in)'
 
     if (-not (Test-Path -LiteralPath $script:TtsVoiceDirectory)) {
@@ -514,6 +540,8 @@ function tts-voice-add {
         [string]$Name
     )
 
+    if ($script:TtsRuntime -and -not $script:TtsRuntime.capabilities.voiceCloning) { Write-Error 'The selected engine does not support reference-recording voices.'; return }
+
     if ($Name -eq 'default') {
         Write-Error 'default is the reserved built-in voice.'
         return
@@ -535,6 +563,7 @@ function tts-voice-add {
     }
 
     if (-not (Wait-TtsReady)) {
+        Write-Error 'The selected speech engine is not ready.'
         return
     }
 
@@ -567,6 +596,8 @@ function tts-voice-remove {
         [string]$Name
     )
 
+    if ($script:TtsRuntime -and -not $script:TtsRuntime.capabilities.voiceCloning) { Write-Error 'The selected engine does not support reference-recording voices.'; return }
+
     if ($Name -eq 'default') {
         Write-Error 'Cannot remove the built-in default voice.'
         return
@@ -587,6 +618,7 @@ function tts-voice-remove {
     }
 
     if (-not (Wait-TtsReady)) {
+        Write-Error 'The selected speech engine is not ready.'
         return
     }
 
@@ -617,6 +649,6 @@ function tts-voice-test {
     )
 
     tts-say `
-        -Text 'Hello! This is a test of my Chatterbox voice.' `
+        -Text 'Hello! This is a test of my TTS voice.' `
         -Voice $Name
 }

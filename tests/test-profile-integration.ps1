@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 
 # Runs real executable registration, root installer orchestration and
 # command wrappers against a disposable copy. Dependency installation,
@@ -53,7 +53,7 @@ try {
     $fixtureRepo = Join-Path $testRoot 'repository'
     foreach ($relative in @('install.ps1', 'uninstall.ps1', 'scripts\script-invocation.ps1', 'scripts\installation-state.ps1', 'scripts\uninstall.ps1', 'scripts\install-agent-commands.ps1',
         'scripts\command-registration.ps1', 'scripts\command-host.cs', 'scripts\configuration.ps1', 'scripts\profile-loader.ps1', 'scripts\config.ps1', 'scripts\agent-commands.ps1',
-        'config\defaults.json', 'tts\tts.ps1', 'tts\tts_service.py')) {
+        'config\defaults.json', 'tts\tts.ps1', 'tts\tts_service.py', 'tts\strategy-management.ps1', 'tts\strategy.schema.json', 'tts\strategies\chatterbox-turbo\manifest.json', 'tts\strategies\chatterbox-turbo\install.ps1', 'tts\strategies\chatterbox-turbo\uninstall.ps1', 'tts\strategies\chatterbox-turbo\backend.py', 'tts\strategies\chatterbox-turbo\requirements.txt', 'tts\strategies\chatterbox-turbo\prepare_model.py')) {
         $destination = Join-Path $fixtureRepo $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $sourceRoot $relative) -Destination $destination
@@ -83,7 +83,7 @@ New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
 exit 0
 '@
     Write-Fixture (Join-Path $fixtureRepo 'tts\install-tts.ps1') @'
-param([string]$InstallPath, [string]$Device)
+param([string]$InstallPath, [string]$Device, [string]$TtsEngine)
 $destination = Join-Path $InstallPath 'tts'
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 foreach ($name in @('tts.ps1', 'tts_service.py')) {

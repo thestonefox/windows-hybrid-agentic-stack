@@ -89,7 +89,10 @@ function Get-StackFileSHA256 {
         $Path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
     }
     $sharing = if ($AllowConcurrentWrite) { [IO.FileShare]::ReadWrite } else { [IO.FileShare]::Read }
-    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $sharing)
+    # Private model copies can be several GB. Buffer sequential reads while
+    # retaining the same sharing restrictions and SHA-256 verification.
+    $stream = [IO.FileStream]::new($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+        $sharing, 1MB, [IO.FileOptions]::SequentialScan)
     try {
         $sha = [Security.Cryptography.SHA256]::Create()
         try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','') }
@@ -114,9 +117,20 @@ function Read-StackInstallationState {
     $path = Join-Path $Root '.whas-installation.json'
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
     $state = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($state.SchemaVersion -ne 1 -or $state.InstallPath -ine $Root -or
+    if ($state.SchemaVersion -notin @(1,2) -or $state.InstallPath -ine $Root -or
         $state.OwnerSid -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or
         $state.InstallationId -notmatch '^[a-f0-9]{32}$') { throw 'Invalid or foreign installation ownership record.' }
+    if ($state.SchemaVersion -eq 2) {
+        if ($state.TtsStrategies -isnot [array] -or $state.TtsStrategies.Count -ne 1) { throw 'Invalid strategy installation record.' }
+        $strategy = $state.TtsStrategies[0]
+        if ($strategy.Id -notmatch '^[a-z][a-z0-9-]{0,47}$' -or $strategy.Context.InstallPath -ine $Root -or
+            $strategy.Context.Engine -cne $strategy.Id -or $strategy.ApiVersion -ne 1 -or $strategy.Status -notin @('Installing','Prepared','Installed')) { throw 'Invalid strategy context.' }
+        $environment = "tts/engines/$($strategy.Id)/.venv"
+        if ($strategy.Context.EnvironmentPath -cne $environment -and
+            -not ($strategy.Id -ceq 'chatterbox-turbo' -and $strategy.Context.EnvironmentPath -ceq '.venv' -and -not $state.PreexistingVenv)) { throw 'Invalid strategy environment path.' }
+        if ($strategy.Context.ModelsPath -cne "tts/engines/$($strategy.Id)/models" -or
+            $strategy.Context.VoicesPath -notin @('voices',"voices/$($strategy.Id)")) { throw 'Invalid strategy resource paths.' }
+    }
     foreach ($entry in @($state.Files) + @($state.OriginalFiles)) {
         $null = Resolve-StackOwnedPath -Root $Root -Relative $entry.Path
     }
@@ -134,7 +148,18 @@ function Test-StackGeneratedFile {
     if (@($State.PreexistingPaths) -contains $Path) { return $false }
     if ($Path -in @('tts/service.log','tts/service-errors.log','tts/service.pid','tts/last-spoken.wav')) { return $true }
     # Numba writes compiled-code (.nbc) and index (.nbi) caches beside Python bytecode.
-    return (-not $State.PreexistingVenv -and $Path -match '^\.venv/(.+/)?__pycache__/[^/]+\.(pyc|nbc|nbi)$')
+    if (-not $State.PreexistingVenv -and $Path -match '^\.venv/(.+/)?__pycache__/[^/]+\.(pyc|nbc|nbi)$') { return $true }
+    foreach ($strategy in @($State.TtsStrategies)) {
+        if ($null -eq $strategy) { continue }
+        $prefix = [regex]::Escape([string]$strategy.Context.EnvironmentPath)
+        if ($Path -match ('^' + $prefix + '/(.+/)?__pycache__/[^/]+\.(pyc|nbc|nbi)$')) { return $true }
+        # Hugging Face local_dir metadata is disposable only within this owned model root.
+        $models = [regex]::Escape([string]$strategy.Context.ModelsPath)
+        if ($Path -match ('^' + $models + '/\.cache/huggingface/(.+/)?[^/]+\.(lock|metadata)$')) { return $true }
+        $package = [regex]::Escape('tts/strategies/' + $strategy.Id)
+        if ($Path -match ('^' + $package + '/(.+/)?__pycache__/[^/]+\.pyc$')) { return $true }
+    }
+    return $false
 }
 
 function Start-StackInstallationTracking {
@@ -184,6 +209,8 @@ function Start-StackInstallationTracking {
     $known = @{}
     foreach ($directory in $tree.Directories) {
         if (-not $state.PreexistingVenv -and $directory -match '^\.venv/(.+/)?__pycache__$') { continue }
+        if ((Test-StackGeneratedFile ($directory + '/placeholder.pyc') $state) -or
+            (Test-StackGeneratedFile ($directory + '/placeholder.metadata') $state)) { continue }
         if (@($state.Directories) -notcontains $directory -and @($state.PreexistingDirectories) -notcontains $directory) { $state.PreexistingDirectories += $directory }
     }
     foreach ($entry in $state.Files) { $known[$entry.Path] = $entry }
@@ -192,7 +219,7 @@ function Start-StackInstallationTracking {
     $managedFiles = @('opencode.json','AGENTS.md','config/defaults.json','config/config.json',
         'scripts/agent-commands.ps1','scripts/config.ps1','scripts/configuration.ps1',
         'scripts/command-registration.ps1','scripts/installation-state.ps1','scripts/uninstall.ps1','scripts/script-invocation.ps1',
-        'tts/tts.ps1','tts/tts_service.py','uninstall.ps1')
+        'tts/tts.ps1','tts/tts_service.py','tts/strategy-management.ps1','tts/runtime.json','uninstall.ps1')
     foreach ($relative in $tree.Files | Where-Object { $_ -ne '.whas-installation.json' }) {
         if (Test-StackGeneratedFile $relative $state) { continue }
         $owned = $known.ContainsKey($relative)
@@ -225,6 +252,11 @@ function Complete-StackInstallationTracking {
     [CmdletBinding()]
     param($Session, [bool]$Succeeded)
     $state = $Session.State
+    $latest = Read-StackInstallationState $Session.Root
+    if ($latest -and $latest.SchemaVersion -eq 2) {
+        $state.SchemaVersion = 2
+        $state | Add-Member -NotePropertyName TtsStrategies -NotePropertyValue @($latest.TtsStrategies) -Force
+    }
     $root = Assert-StackInstallationRoot -Root $Session.Root
     $tree = Get-StackInstallationTree -Root $root
     $originals = @($state.OriginalFiles.Path)

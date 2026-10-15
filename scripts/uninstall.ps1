@@ -18,6 +18,7 @@ function Get-StackUninstallPlan {
         RestorePreviousRegistration = $false
         ManifestSHA256 = $null; RegistrationSHA256 = $null
         UnregisterCommands = $false; RemoveManagedModels = [bool]$RemoveManagedModels
+        TtsHooks = @()
         AlreadyAbsent = -not (Test-Path -LiteralPath $root)
     }
     if ($null -eq $state) {
@@ -124,6 +125,10 @@ function Get-StackUninstallPlan {
         }
         else { $plan.KeepModels += $model.Name }
     }
+    if ($state.SchemaVersion -eq 2 -and $state.Status -ne 'Uninstalled') {
+        if (-not (Get-Command Get-TtsInstalledHooks -ErrorAction Ignore)) { throw 'TTS strategy cleanup helper is unavailable.' }
+        $plan.TtsHooks = @(Get-TtsInstalledHooks $root $state)
+    }
     return $plan
 }
 
@@ -134,6 +139,12 @@ function Stop-StackOwnedSpeech {
     if (-not $hasPid -and -not (Test-Path -LiteralPath (Join-Path $Root 'tts\tts_service.py'))) { return }
     $saved = if ($hasPid) { [IO.File]::ReadAllText($pidFile).Trim() } else { '0' }
     if ($saved -notmatch '^\d+$') { throw 'Invalid speech PID file; no processes stopped.' }
+    $pythonPath = Join-Path $Root '.venv\Scripts\python.exe'
+    $state = Read-StackInstallationState $Root
+    if ($state.SchemaVersion -eq 2 -and @($state.TtsStrategies).Count -eq 1) {
+        $environment = Resolve-StackOwnedPath $Root $state.TtsStrategies[0].Context.EnvironmentPath
+        $pythonPath = Join-Path $environment 'Scripts/python.exe'
+    }
     $marker = '"' + (Join-Path $Root 'tts\tts_service.py') + '"'
     $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
     $launcher = @($processes | Where-Object { $hasPid -and $_.ProcessId -eq ([int]$saved) })
@@ -144,7 +155,7 @@ function Stop-StackOwnedSpeech {
         return
     }
     if ($launcher[0].Name -notmatch '^python(w)?\.exe$' -or -not $launcher[0].CommandLine.Contains($marker) -or
-        $launcher[0].ExecutablePath -ine (Join-Path $Root '.venv\Scripts\python.exe')) { throw 'Saved PID belongs to another process; it was not stopped.' }
+        $launcher[0].ExecutablePath -ine $pythonPath) { throw 'Saved PID belongs to another process; it was not stopped.' }
     $matching = @($processes | Where-Object {
         $_.Name -match '^python(w)?\.exe$' -and $_.CommandLine -and $_.CommandLine.Contains($marker) -and
         ($_.ProcessId -eq [int]$saved -or $_.ParentProcessId -eq [int]$saved)
@@ -182,7 +193,7 @@ function Invoke-StackUninstall {
     $current = Get-StackUninstallPlan -InstallPath $Plan.Root -RemoveManagedModels:$Plan.RemoveManagedModels
     $receipt = [ordered]@{ StartedAtUtc = [DateTime]::UtcNow.ToString('o'); InstallationId = $current.State.InstallationId;
         InstallPath = $current.Root; DeletedFiles = [Collections.Generic.List[string]]::new(); RestoredFiles = @(); RemovedModels = @(); KeptFiles = $current.KeepFiles;
-        KeptModels = $current.KeepModels; PreviousRegistrationRestored = $false; Completed = $false }
+        TtsStrategies = @(); KeptModels = $current.KeepModels; PreviousRegistrationRestored = $false; Completed = $false }
     New-Item -ItemType Directory -Path $receiptRoot -Force -ErrorAction Stop | Out-Null
     $receiptPath = Join-Path $receiptRoot ('uninstall-' + [guid]::NewGuid().ToString('N') + '.json')
     try {
@@ -191,6 +202,12 @@ function Invoke-StackUninstall {
         $current = Get-StackUninstallPlan -InstallPath $Plan.Root -RemoveManagedModels:$Plan.RemoveManagedModels
         $receipt.KeptFiles = $current.KeepFiles
         $receipt.KeptModels = $current.KeepModels
+        foreach ($hook in $current.TtsHooks) {
+            Invoke-TtsVerifiedHook -Path $hook.Path -SHA256 $hook.SHA256 -Arguments @{Context=$hook.Context}
+            $receipt.TtsStrategies += [pscustomobject]@{Id=$hook.Id; HookCompleted=$true}
+        }
+        # Hooks are trusted code. Revalidate file ownership after they return.
+        $current = Get-StackUninstallPlan -InstallPath $Plan.Root -RemoveManagedModels:$Plan.RemoveManagedModels
         foreach ($model in $current.RemoveModels) {
             $verified = @(Get-StackOllamaModels | Where-Object { $_.name -ceq $model.Name -and $_.digest -ceq $model.Digest })
             if ($verified.Count -ne 1) { throw 'Managed model changed since preview; files retained.' }

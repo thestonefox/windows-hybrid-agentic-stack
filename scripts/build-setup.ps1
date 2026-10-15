@@ -22,7 +22,11 @@ $properties = [ordered]@{
     Preview = 'scripts\setup-preview.ps1'
     Prerequisites = 'scripts\check-prerequisites.ps1'
     Defaults = 'config\defaults.json'
+    StrategyHelper = 'tts\strategy-management.ps1'
 }
+. (Join-Path $repo 'tts/strategy-management.ps1')
+$packages = @(Get-TtsStrategies -Root $repo)
+$catalog = ConvertTo-Json -InputObject @($packages | ForEach-Object { $_.Manifest }) -Depth 12 -Compress
 $payload = New-Object Text.StringBuilder
 $null = $payload.AppendLine('using System; using System.Text; using System.Collections.Generic; namespace WindowsHybridAgenticStack { internal static class SetupPayload {')
 $null = $payload.AppendLine('internal static readonly Dictionary<string,string> Files = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase) {')
@@ -31,6 +35,10 @@ $assets = @($properties.Values) + @('install.ps1','uninstall.ps1','config\AGENTS
     'scripts\command-host.cs','scripts\command-registration.ps1','scripts\profile-loader.ps1',
     'scripts\config.ps1','scripts\agent-commands.ps1','scripts\installation-state.ps1','scripts\uninstall.ps1',
     'tts\install-tts.ps1','tts\tts.ps1','tts\tts_service.py')
+$assets += 'tts/strategy.schema.json'
+foreach ($package in $packages) {
+    foreach ($file in $package.Files) { $assets += "tts/strategies/$($package.Manifest.id)/$file" }
+}
 foreach ($relative in $assets | Select-Object -Unique) {
     $encoded = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $repo $relative)))
     $null = $payload.AppendLine(('{"'+$relative.Replace('\','/')+'","'+$encoded+'"},'))
@@ -39,6 +47,8 @@ $null = $payload.AppendLine('}; internal static string ReadText(string name) { r
 foreach ($name in $properties.Keys) {
     $null = $payload.AppendLine(('internal static string {0} {{ get {{ return ReadText("{1}"); }} }}' -f $name,$properties[$name].Replace('\','/')))
 }
+$catalogEncoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($catalog))
+$null = $payload.AppendLine(('internal static string StrategyCatalog { get { return Encoding.UTF8.GetString(Convert.FromBase64String("' + $catalogEncoded + '")); } }'))
 $null = $payload.AppendLine('} }')
 $build = Join-Path ([IO.Path]::GetTempPath()) ('whas-setup-build-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($build) | Out-Null

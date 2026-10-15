@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 1,
+  "id": "chatterbox-turbo",
+  "version": "1.0.0",
+  "name": "Chatterbox Turbo",
+  "description": "Local speech with a built-in voice and reference-recording voice cloning.",
+  "platforms": ["windows-x64"],
+  "devices": ["cpu", "cuda"],
+  "prerequisites": {"python": "3.11", "visualCpp": true},
+  "capabilities": {"builtinVoice": true, "voiceCloning": true},
+  "entrypoints": {"install": "install.ps1", "uninstall": "uninstall.ps1", "backend": "backend.py"},
+  "files": ["install.ps1", "uninstall.ps1", "backend.py", "requirements.txt", "prepare_model.py"],
+  "license": "MIT",
+  "models": [{"source": "https://huggingface.co/ResembleAI/chatterbox-turbo", "revision": "749d1c1a46eb10492095d68fbcf55691ccf137cd", "license": "MIT"}]
+}

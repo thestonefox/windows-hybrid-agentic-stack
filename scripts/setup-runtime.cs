@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Management.Automation;
@@ -34,7 +36,23 @@ namespace WindowsHybridAgenticStack {
         }
         public static SetupScriptResult InvokeScript(string path, IDictionary arguments) { return Execute(path, arguments, false); }
 
-        private static SetupScriptResult Execute(string path, IDictionary arguments, bool display) {
+        public static SetupScriptResult InvokeVerifiedScript(string path, string hash, IDictionary arguments) {
+            string text;
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+                using (var sha = SHA256.Create()) {
+                    string actual = BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "");
+                    if (actual != hash) throw new InvalidOperationException("Strategy hook changed.");
+                }
+                stream.Position = 0;
+                using (var reader = new StreamReader(stream)) text = reader.ReadToEnd();
+            }
+            Token[] tokens; ParseError[] errors;
+            var ast = Parser.ParseInput(text, Path.GetFullPath(path), out tokens, out errors);
+            if (errors.Length != 0) throw new InvalidOperationException("Invalid installed strategy hook.");
+            return Execute(path, arguments, false, ast.GetScriptBlock());
+        }
+
+        private static SetupScriptResult Execute(string path, IDictionary arguments, bool display, ScriptBlock verified = null) {
             ConsoleHost host = new ConsoleHost();
             using (Runspace runspace = RunspaceFactory.CreateRunspace(host)) {
                 runspace.Open();
@@ -46,7 +64,7 @@ namespace WindowsHybridAgenticStack {
                     ps.Invoke();
                     if (ps.HadErrors) throw new InvalidOperationException(ps.Streams.Error[0].ToString());
                     ps.Commands.Clear(); ps.Streams.Error.Clear();
-                    runspace.SessionStateProxy.SetVariable("StackSetupEntrypoint", LoadScript(path));
+                    runspace.SessionStateProxy.SetVariable("StackSetupEntrypoint", verified ?? LoadScript(path));
                     runspace.SessionStateProxy.SetVariable("StackSetupArguments", arguments);
                     ps.AddScript("& $StackSetupEntrypoint @StackSetupArguments", false);
                     if (display) ps.AddCommand("Out-Default");
@@ -77,7 +95,15 @@ namespace WindowsHybridAgenticStack {
                 try {
                     foreach (var file in SetupPayload.Files) DeleteExtracted(cleanupRoot, file.Key);
                     if (configuration != null) DeleteExtracted(cleanupRoot, "config/config.json");
-                    foreach (string directory in new string[] { "scripts", "config", "tts", "" }) {
+                    var parents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    parents.Add("");
+                    foreach (var file in SetupPayload.Files) {
+                        string directory = Path.GetDirectoryName(file.Key.Replace('/', Path.DirectorySeparatorChar));
+                        while (!String.IsNullOrEmpty(directory)) { parents.Add(directory); directory = Path.GetDirectoryName(directory); }
+                    }
+                    var ordered = new List<string>(parents);
+                    ordered.Sort((a, b) => b.Length.CompareTo(a.Length));
+                    foreach (string directory in ordered) {
                         string path = CheckedExtractedPath(cleanupRoot, directory);
                         if (Directory.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0 && Directory.GetFileSystemEntries(path).Length == 0)
                             Directory.Delete(path);

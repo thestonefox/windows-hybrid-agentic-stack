@@ -111,10 +111,13 @@ Check your NVIDIA GPU:
 nvidia-smi
 ```
 
-Check CUDA availability using the installed Python environment:
+For Chatterbox, check CUDA availability using the installed strategy environment (adjust `$root` for a custom installation; older installations without `runtime.json` use the legacy root `.venv`):
 
 ```powershell
-& "$HOME\AI\WindowsHybridAgenticStack\.venv\Scripts\python.exe" -c "import torch; print('CUDA available:', torch.cuda.is_available())"
+$root = Join-Path $HOME 'AI\WindowsHybridAgenticStack'
+$runtime = Get-Content -LiteralPath (Join-Path $root 'tts/runtime.json') -Raw | ConvertFrom-Json
+$python = Join-Path (Join-Path $root $runtime.environmentPath) 'Scripts/python.exe'
+& $python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
 ```
 
 If CUDA is unavailable, verify your driver and installed PyTorch build.

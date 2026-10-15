@@ -6,14 +6,13 @@
 
 .DESCRIPTION
     Checks prerequisites for cloud agents, local agents and
-    Chatterbox Turbo TTS.
+    the selected TTS strategy.
 
     For TTS, requires:
-      - 64-bit Python 3.11
-      - Microsoft Visual C++ Redistributable (x64)
+      - 64-bit compatible Python
+      - Engine-declared native prerequisites, when required
 
-    An NVIDIA GPU is optional. Without one, the TTS installer
-    selects CPU-only PyTorch.
+    Device support and Python/native prerequisites come from the strategy manifest.
 
     This script does not install or change anything.
 
@@ -31,7 +30,8 @@
 param(
     [switch]$Cloud,
     [switch]$Local,
-    [switch]$Voice
+    [switch]$Voice,
+    [string]$StrategyManifestJson
 )
 
 $ErrorActionPreference = 'Stop'
@@ -342,14 +342,25 @@ if ($Local) {
 
 # Python, Visual C++ and NVIDIA are relevant only to TTS.
 if ($Voice) {
+    if ($StrategyManifestJson) { $strategy = $StrategyManifestJson | ConvertFrom-Json }
+    else {
+        . (Join-Path $PSScriptRoot '../tts/strategy-management.ps1')
+        . (Join-Path $PSScriptRoot 'configuration.ps1')
+        $settings = Get-StackConfiguration -Root (Split-Path -Parent $PSScriptRoot)
+        $strategy = (Get-TtsStrategy -Root (Split-Path -Parent $PSScriptRoot) -Id $settings.tts.engine).Manifest
+    }
+    $pythonVersion = [string]$strategy.prerequisites.python
+    $pythonParts = $pythonVersion.Split('.')
+    $pythonMajor = [int]$pythonParts[0]; $pythonMinor = [int]$pythonParts[1]
+    Add-Check 'Speech engine' 'INFO' $strategy.name $false
     $pythons = @(Get-PythonInstallations)
 
-    # The TTS installer explicitly uses "py -3.11".
+    # Verify the precise interpreter declared by the selected strategy.
     $compatible = @(
         $pythons | Where-Object {
             $_.Bits -eq 64 -and
-            $_.Version.Major -eq 3 -and
-            $_.Version.Minor -eq 11
+            $_.Version.Major -eq $pythonMajor -and
+            $_.Version.Minor -eq $pythonMinor
         }
     )
 
@@ -363,7 +374,7 @@ if ($Voice) {
         $launcherWorks = $false
 
         try {
-            & $launcher.Source -3.11 -c "import struct,sys; sys.exit(0 if sys.version_info[:2] == (3,11) and struct.calcsize('P')*8 == 64 else 1)" 2>$null
+            & $launcher.Source "-$pythonVersion" -c "import struct,sys; sys.exit(0 if sys.version_info[:2] == ($pythonMajor,$pythonMinor) and struct.calcsize('P')*8 == 64 else 1)" 2>$null
 
             $launcherWorks = ($LASTEXITCODE -eq 0)
         }
@@ -372,60 +383,64 @@ if ($Voice) {
         }
 
         if ($launcherWorks) {
-            Add-Check 'Python 3.11' 'PASS' "Python $($python.Version), 64-bit - $($python.Path)" $true
+            Add-Check "Python $pythonVersion" 'PASS' "Python $($python.Version), 64-bit - $($python.Path)" $true
         }
         else {
-            Add-Check 'Python 3.11' 'FAIL' '64-bit Python 3.11 was found, but the Python launcher could not run it using py -3.11.' $true
+            Add-Check "Python $pythonVersion" 'FAIL' '64-bit compatible Python was found, but the Python launcher could not run it using the selected Python version.' $true
         }
     }
     elseif ($compatible.Count -gt 0) {
-        Add-Check 'Python 3.11' 'FAIL' '64-bit Python 3.11 found, but py.exe is missing. Install the Windows Python launcher.' $true
+        Add-Check "Python $pythonVersion" 'FAIL' '64-bit compatible Python found, but py.exe is missing. Install the Windows Python launcher.' $true
     }
     else {
-        Add-Check 'Python 3.11' 'FAIL' '64-bit Python 3.11 not found. Install with: winget install --id Python.Python.3.11 --exact --source winget' $true
+        Add-Check "Python $pythonVersion" 'FAIL' "Install 64-bit Python $pythonVersion with its Windows Python launcher." $true
     }
 
-    # Microsoft Visual C++ runtime is needed for PyTorch DLLs.
-    $vcRuntime = Get-VcRedistributable
+    # Check native prerequisites declared by the selected strategy.
+    if ($strategy.prerequisites.visualCpp) {
+        $vcRuntime = Get-VcRedistributable
 
-    if ($null -ne $vcRuntime) {
-        Add-Check `
-            'Visual C++ x64' `
-            'PASS' `
-            "Microsoft Visual C++ Redistributable x64 detected ($($vcRuntime.Version))." `
-            $true
+        if ($null -ne $vcRuntime) {
+            Add-Check `
+                'Visual C++ x64' `
+                'PASS' `
+                "Microsoft Visual C++ Redistributable x64 detected ($($vcRuntime.Version))." `
+                $true
+        }
+        else {
+            Add-Check `
+                'Visual C++ x64' `
+                'FAIL' `
+                'Microsoft Visual C++ Redistributable x64 not detected. Install with: winget install --id Microsoft.VCRedist.2015+.x64 --exact --source winget' `
+                $true
+        }
+
     }
-    else {
-        Add-Check `
-            'Visual C++ x64' `
-            'FAIL' `
-            'Microsoft Visual C++ Redistributable x64 not detected. Install with: winget install --id Microsoft.VCRedist.2015+.x64 --exact --source winget' `
-            $true
-    }
+    if ('cuda' -in $strategy.devices) {
+        # Report GPU availability for CUDA-capable strategies.
+        $nvidia = Get-Executable 'nvidia-smi.exe'
 
-    # An NVIDIA GPU is optional; CPU TTS is supported.
-    $nvidia = Get-Executable 'nvidia-smi.exe'
+        if ($nvidia) {
+            try {
+                $gpu = & $nvidia.Source --query-gpu=name,driver_version,memory.total --format=csv,noheader,nounits 2>$null
 
-    if ($nvidia) {
-        try {
-            $gpu = & $nvidia.Source --query-gpu=name,driver_version,memory.total --format=csv,noheader,nounits 2>$null
-
-            if ($LASTEXITCODE -eq 0 -and $gpu) {
-                Add-Check 'NVIDIA GPU' 'PASS' (($gpu | Out-String).Trim()) $false
+                if ($LASTEXITCODE -eq 0 -and $gpu) {
+                    Add-Check 'NVIDIA GPU' 'PASS' (($gpu | Out-String).Trim()) $false
+                }
+                else {
+                    Add-Check 'NVIDIA GPU' 'WARN' 'NVIDIA GPU query failed; the TTS installer may select CPU mode.' $false
+                }
             }
-            else {
-                Add-Check 'NVIDIA GPU' 'WARN' 'NVIDIA GPU query failed; the TTS installer may select CPU mode.' $false
+            catch {
+                Add-Check 'NVIDIA GPU' 'WARN' $_.Exception.Message $false
             }
         }
-        catch {
-            Add-Check 'NVIDIA GPU' 'WARN' $_.Exception.Message $false
+        else {
+            Add-Check 'NVIDIA GPU' 'INFO' 'No NVIDIA GPU detected. The selected strategy must support CPU to run here.' $false
         }
-    }
-    else {
-        Add-Check 'NVIDIA GPU' 'INFO' 'No NVIDIA GPU detected. The TTS installer will select CPU-only PyTorch by default.' $false
-    }
 
-    Add-Check 'CUDA/PyTorch' 'INFO' 'The TTS installer installs CPU or CUDA 12.6 PyTorch and verifies its dependencies.' $false
+    }
+    Add-Check 'TTS dependencies' 'INFO' 'The selected strategy installs and verifies its own private dependencies.' $false
 }
 
 $results | Format-Table -AutoSize -Wrap

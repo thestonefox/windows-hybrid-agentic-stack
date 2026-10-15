@@ -32,6 +32,7 @@ param(
     [switch]$Cloud,
     [switch]$Local,
     [switch]$Voice,
+    [string]$TtsEngine,
     [switch]$Yes,
     [string]$InstallPath,
     [bool]$PersistCommandPath = $true
@@ -163,6 +164,9 @@ try {
         throw 'Configuration could not be parsed.'
     }
 
+    . (Get-StackSetupScript (Join-Path $repoRoot 'tts\strategy-management.ps1'))
+    if ($TtsEngine -and -not $Voice) { throw '-TtsEngine requires -Voice.' }
+    if ($TtsEngine) { $config.tts.engine = $TtsEngine }
     $explicitSelection = $Cloud -or $Local -or $Voice
 
     if (-not $explicitSelection) {
@@ -179,7 +183,7 @@ try {
             -Default ([bool]$config.agents.local.enabled)
 
         $Voice = Read-YesNo `
-            -Question 'Voice output (Chatterbox Turbo)?' `
+            -Question 'Voice output?' `
             -Default ([bool]$config.tts.enabled)
     }
 
@@ -200,8 +204,17 @@ try {
             throw "Required TTS installer missing: $ttsInstallScript"
         }
 
-        if ($config.tts.engine -ne 'chatterbox-turbo') {
-            throw "Unsupported TTS engine: $($config.tts.engine)"
+        $available = @(Get-TtsStrategies -Root $repoRoot)
+        if (-not $Yes -and -not $TtsEngine -and
+            -not (Test-Path -LiteralPath (Join-Path $repoRoot 'config/config.json'))) {
+            $config.tts.engine = Select-TtsEngine -Manifests @($available | ForEach-Object { $_.Manifest }) -Default $config.tts.engine
+        }
+        $ttsPackage = Get-TtsStrategy -Root $repoRoot -Id $config.tts.engine
+        if ($config.tts.device -ne 'auto' -and $config.tts.device -notin $ttsPackage.Manifest.devices) { throw 'Selected strategy does not support this device.' }
+        Write-Host "TTS package: $($ttsPackage.Manifest.name) $($ttsPackage.Manifest.version); licence: $($ttsPackage.Manifest.license)"
+        foreach ($model in $ttsPackage.Manifest.models) {
+            $pin = if ($model.revision) { "revision $($model.revision)" } else { "SHA256 $($model.sha256)" }
+            Write-Host "Model download: $($model.source), $pin; licence: $($model.license)"
         }
     }
 
@@ -263,6 +276,7 @@ try {
         Voice = [bool]$Voice
     }
 
+    if ($Voice) { $checkArguments.StrategyManifestJson = ($ttsPackage.Manifest | ConvertTo-Json -Depth 12 -Compress) }
     Invoke-StackSetupScript -Path $prerequisiteScript -Arguments $checkArguments
 
     if ($LASTEXITCODE -ne 0) {
@@ -285,7 +299,7 @@ try {
         $trackingArguments.ManagedModelName = 'whas-' + $safeModel.Trim('-') + '-ctx' + $config.agents.local.contextSize
     }
     $trackingSession = Start-StackInstallationTracking @trackingArguments
-    foreach ($relative in @('uninstall.ps1','scripts\uninstall.ps1','scripts\installation-state.ps1','scripts\command-registration.ps1','scripts\script-invocation.ps1')) {
+    foreach ($relative in @('uninstall.ps1','scripts\uninstall.ps1','scripts\installation-state.ps1','scripts\command-registration.ps1','scripts\script-invocation.ps1','tts\strategy-management.ps1')) {
         Copy-StackFile -Source (Join-Path $repoRoot $relative) -Destination (Join-Path $InstallPath $relative)
     }
 
@@ -327,13 +341,13 @@ try {
 
     if ($Voice) {
         Write-Host ''
-        Write-Host 'Installing Chatterbox Turbo...'
+        Write-Host "Installing TTS strategy: $($config.tts.engine)"
         Write-Host ''
 
-        Invoke-StackSetupScript -Path $ttsInstallScript -Arguments @{InstallPath=$InstallPath;Device=[string]$config.tts.device}
+        Invoke-StackSetupScript -Path $ttsInstallScript -Arguments @{InstallPath=$InstallPath;Device=[string]$config.tts.device;TtsEngine=[string]$config.tts.engine}
 
         if ($LASTEXITCODE -ne 0) {
-            throw 'Chatterbox Turbo installation failed.'
+            throw "TTS strategy installation failed: $($config.tts.engine)."
         }
 
         # Keep the installed runtime configuration alongside TTS.
@@ -400,6 +414,13 @@ try {
             Write-Host "Runtime local model: $runtimeModel"
         }
     Write-Host ''
+    if ($Voice) {
+        $runtimeConfigPath = Join-Path $InstallPath 'config/config.json'
+        $runtimeConfig = if (Test-Path -LiteralPath $runtimeConfigPath) { Get-Content -LiteralPath $runtimeConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { [pscustomobject]@{} }
+        if ($null -eq $runtimeConfig.tts) { $runtimeConfig | Add-Member -NotePropertyName tts -NotePropertyValue ([pscustomobject]@{}) }
+        $runtimeConfig.tts | Add-Member -NotePropertyName engine -NotePropertyValue $config.tts.engine -Force
+        [IO.File]::WriteAllText($runtimeConfigPath, ($runtimeConfig | ConvertTo-Json -Depth 12), (New-Object Text.UTF8Encoding($false)))
+    }
     Complete-StackInstallationTracking -Session $trackingSession -Succeeded $true
     $trackingSession = $null
     $installationSucceeded = $true

@@ -608,39 +608,15 @@ The native command path passed live installation, fresh-terminal discovery, clou
 
 ### Chatterbox Python environment
 
-The TTS installer is located at:
-
-```text
-tts/install-tts.ps1
-```
-
-It can also be run independently:
+Use the root installer so the environment, strategy package and model copy are ownership-tracked:
 
 ```powershell
-.\tts\install-tts.ps1
+.\install.ps1 -Voice -TtsEngine chatterbox-turbo
 ```
 
-This component installer prepares TTS files and dependencies; use the root installer for automatic executable registration, or the registration helper above for an existing installation.
+The shared coordinator is `tts/install-tts.ps1`; the engine-specific dependency installer lives in `tts/strategies/chatterbox-turbo/install.ps1`. Component/hook scripts are not fresh-install entry points.
 
-To prepare only the Python virtual environment:
-
-```powershell
-.\tts\install-tts.ps1 -PrepareOnly
-```
-
-To force CPU installation:
-
-```powershell
-.\tts\install-tts.ps1 -Device cpu
-```
-
-To request CUDA installation explicitly:
-
-```powershell
-.\tts\install-tts.ps1 -Device cuda
-```
-
-For normal use, omit `-Device` so the installer uses the configured default of `auto`.
+Set `tts.device` in your local configuration to `cpu`, `cuda` or `auto` before installation. New environments live under `tts/engines/chatterbox-turbo/.venv`; recognized legacy installations retain their existing environment path. See `tts/runtime.json` in the installation for the actual layout.
 
 The initial reference dependency versions include:
 
@@ -698,7 +674,7 @@ All four commands support the same options:
 | `-m MODEL`, `--model MODEL` | Override the model for this invocation |
 | `-l`, `--log` | Show full OpenCode output |
 | `-h`, `--help` | Show usage information |
-| `-v`, `--voice` | Speak the final answer using Chatterbox |
+| `-v`, `--voice` | Speak the final answer using the selected engine |
 
 Examples:
 
@@ -744,7 +720,7 @@ Voice output can also be combined with full logging:
 localagent -v -l "What is 2 plus 2?"
 ```
 
-The command displays the OpenCode events and passes the final answer to Chatterbox.
+The command displays the OpenCode events and passes the final answer to the selected speech engine.
 
 **Native cloud and local voice commands generated valid 24 kHz WAV files, completed playback and returned normally on the reference machine. The user confirmed hearing both responses. Earlier profile-registration tests are retained as historical results.**
 
@@ -784,7 +760,7 @@ opencode models
 
 Listing a model confirms configuration visibility, not successful model inference or authentication.
 
-## Chatterbox TTS commands
+## TTS commands
 
 After voice installation, open a new Windows PowerShell window.
 
@@ -792,8 +768,8 @@ The installer registers the following commands:
 
 | Command | Purpose |
 |---|---|
-| `tts-start` | Start the Chatterbox service |
-| `tts-stop` | Stop the Chatterbox service |
+| `tts-start` | Start the selected speech engine |
+| `tts-stop` | Stop the selected speech engine |
 | `tts-status` | Display service status |
 | `tts-say` | Generate and play speech |
 | `tts-voice-list` | List locally cached voices |
@@ -864,6 +840,17 @@ Custom voices are stored inside the stack installation's `voices` directory.
 The built-in `default` voice is reserved and cannot be removed.
 
 **Only create voice profiles using recordings you have permission to use.**
+
+## TTS engine strategies
+
+Chatterbox Turbo is the first bundled strategy. TTS packages are discovered from `tts/strategies/<id>/`; additional trusted packages can supply their own installation, backend and uninstall behavior. Source and standalone setup support explicit engine selection:
+
+```powershell
+.\install.ps1 -Voice -TtsEngine chatterbox-turbo
+# Standalone: whas-setup.exe --install --voice --tts-engine chatterbox-turbo
+```
+
+The main uninstaller coordinates the installed strategy's cleanup hook and ownership-based removal. Personal voice data is preserved. See [TTS strategy packages](docs/tts-strategies.md) for the package contract, runtime layout, compatibility and limitations. Piper and F5-TTS are not bundled yet.
 
 ## Troubleshooting
 

@@ -1,224 +1,190 @@
-"""Loopback-only Chatterbox Turbo server. Stops after ten minutes without requests."""
-import io
-import os
+"""Loopback-only, engine-independent strategy API v1 speech service."""
+import importlib.util
 import json
+import os
 import re
-import shutil
 import sys
 import time
 import traceback
+import hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-# Native command launchers deliberately pass no inherited pipe handles.
-# Open logs before importing dependencies so their startup warnings are retained.
 if os.environ.get('AGENT_STACK_TTS_OWN_LOGS') == '1':
-    log_dir = Path(__file__).resolve().parent
-    sys.stdout = (log_dir / 'service.log').open('w', encoding='utf-8', buffering=1)
-    sys.stderr = (log_dir / 'service-errors.log').open('w', encoding='utf-8', buffering=1)
+    logs = Path(__file__).resolve().parent
+    sys.stdout = (logs / 'service.log').open('w', encoding='utf-8', buffering=1)
+    sys.stderr = (logs / 'service-errors.log').open('w', encoding='utf-8', buffering=1)
     sys.stdin = open(os.devnull, 'r')
 
-import torchaudio
-from chatterbox.tts_turbo import ChatterboxTurboTTS, Conditionals
-
-# Runtime values are supplied by the stack's PowerShell service launcher.
-# Defaults preserve the behaviour of the original standalone service.
-ROOT = Path(os.environ.get('AGENT_STACK_TTS_ROOT', str(Path(__file__).resolve().parent.parent))).resolve()
-VOICES = ROOT / 'voices'
-IDLE_SECONDS = int(os.environ.get('AGENT_STACK_TTS_IDLE_SECONDS', '600'))
-PORT = int(os.environ.get('AGENT_STACK_TTS_PORT', '18765'))
-DEVICE = os.environ.get('AGENT_STACK_TTS_DEVICE', 'cuda').strip().lower()
-HOST = '127.0.0.1'
-
-if IDLE_SECONDS < 0:
-    raise ValueError('AGENT_STACK_TTS_IDLE_SECONDS must be zero or greater')
-if not 1 <= PORT <= 65535:
-    raise ValueError('AGENT_STACK_TTS_PORT must be between 1 and 65535')
-if DEVICE not in ('cuda', 'cpu'):
-    raise ValueError('AGENT_STACK_TTS_DEVICE must be cuda or cpu')
-MAX_REQUEST = 128000
 VOICE_NAME = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}$')
-
-print(f'Loading Chatterbox Turbo on {DEVICE}...', flush=True)
-model = ChatterboxTurboTTS.from_pretrained(device=DEVICE)
-VOICES.mkdir(parents=True, exist_ok=True)
-# Bundled conditioning is the built-in voice. Retain it across custom voice switches.
-default_conds = model.conds
-if default_conds is None:
-    raise RuntimeError('Chatterbox Turbo did not load its built-in voice conditioning (conds.pt).')
-print(f'Listening on http://{HOST}:{PORT} (idle timeout {IDLE_SECONDS}s)', flush=True)
-last_used = time.monotonic()
-current_voice = 'default'
+MAX_REQUEST = 128000
 
 
-def voice_cache(name):
-    return VOICES / (name + '_prompt.pt')
+def owned_path(root, relative):
+    candidate = Path(relative)
+    if candidate.is_absolute() or '..' in candidate.parts or ':' in relative:
+        raise ValueError('Invalid runtime-relative path')
+    path = (root / candidate).resolve()
+    if not path.is_relative_to(root):
+        raise ValueError('Runtime path escapes installation')
+    current = root / candidate
+    while current != root.parent:
+        if current.is_symlink() or (hasattr(current, 'is_junction') and current.is_junction()):
+            raise ValueError('Runtime links are not supported')
+        if current == root:
+            break
+        current = current.parent
+    return path
 
 
-def voice_wav(name):
-    return VOICES / (name + '_prompt.wav')
+def load_backend(root):
+    runtime = json.loads((root / 'tts/runtime.json').read_text(encoding='utf-8-sig'))
+    if runtime.get('schemaVersion') != 1:
+        raise ValueError('Unsupported TTS runtime schema')
+    state = json.loads((root / '.whas-installation.json').read_text(encoding='utf-8-sig'))
+    records = [r for r in state.get('TtsStrategies', []) if r['Id'] == runtime['engine']]
+    if len(records) != 1 or records[0]['Status'] != 'Installed':
+        raise ValueError('TTS strategy is not fully installed')
+    for asset in records[0]['PackageFiles']:
+        path = owned_path(root, asset['Path'])
+        if hashlib.sha256(path.read_bytes()).hexdigest().upper() != asset['SHA256']:
+            raise ValueError('Installed strategy package changed')
+    backend_path = owned_path(root, runtime['backendPath'])
+    recorded = {asset['Path'] for asset in records[0]['PackageFiles']}
+    if runtime['backendPath'] not in recorded:
+        raise ValueError('Backend is not in the installed strategy package')
+    manifest = json.loads(owned_path(root, 'tts/strategies/' + runtime['engine'] + '/manifest.json').read_text(encoding='utf-8-sig'))
+    context_record = records[0]['Context']
+    for runtime_key, context_key in [('environmentPath', 'EnvironmentPath'), ('voicesPath', 'VoicesPath'), ('modelsPath', 'ModelsPath'), ('device', 'Device')]:
+        if runtime[runtime_key] != context_record[context_key]:
+            raise ValueError('Runtime layout differs from installed strategy record')
+    if runtime['capabilities'] != manifest['capabilities'] or runtime['device'] not in manifest['devices']:
+        raise ValueError('Runtime capabilities/device differ from installed package')
+    if runtime['backendPath'] != 'tts/strategies/' + runtime['engine'] + '/' + manifest['entrypoints']['backend']:
+        raise ValueError('Runtime backend differs from installed package')
+    spec = importlib.util.spec_from_file_location('whas_tts_backend', backend_path,
+        submodule_search_locations=[str(backend_path.parent)])
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    context = {'device': runtime['device'], 'voices_directory': str(owned_path(root, runtime['voicesPath'])),
+               'models_directory': str(owned_path(root, runtime['modelsPath']))}
+    backend = module.create_backend(context)
+    for method in ('load', 'synthesise', 'list_voices', 'close'):
+        if not callable(getattr(backend, method, None)):
+            raise ValueError('Backend does not implement strategy API v1: ' + method)
+    if runtime['capabilities'].get('voiceCloning'):
+        for method in ('add_voice', 'remove_voice'):
+            if not callable(getattr(backend, method, None)):
+                raise ValueError('Backend does not implement declared voice capability: ' + method)
+    backend.load()
+    return backend, runtime
 
 
-def valid_voice(name):
-    return isinstance(name, str) and VOICE_NAME.fullmatch(name) is not None
+def serve(root, backend, runtime, port, idle_seconds):
+    last_used = time.monotonic()
 
+    class Handler(BaseHTTPRequestHandler):
+        def respond(self, status, payload, content_type='application/json'):
+            self.send_response(status)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
 
-def voice_names():
-    return ['default'] + sorted(p.name[:-len('_prompt.pt')] for p in VOICES.glob('*_prompt.pt')
-                  if valid_voice(p.name[:-len('_prompt.pt')]) and p.name != 'default_prompt.pt')
+        def json_response(self, status, data):
+            self.respond(status, json.dumps(data).encode('utf-8'))
 
+        def do_GET(self):
+            nonlocal last_used
+            if self.path == '/status':
+                self.json_response(200, {'running': True, 'loaded_voice': getattr(backend, 'loaded_voice', 'default'),
+                    'idle_timeout_seconds': idle_seconds, 'engine': runtime['engine'], 'installation_root': str(root),
+                    'capabilities': runtime['capabilities']})
+            elif self.path == '/voices':
+                last_used = time.monotonic()
+                self.json_response(200, {'voices': backend.list_voices(), 'loaded_voice': getattr(backend, 'loaded_voice', 'default')})
+            else:
+                self.json_response(404, {'error': 'Not found'})
 
-class Handler(BaseHTTPRequestHandler):
-    def respond(self, status, payload, content_type='application/json'):
-        self.send_response(status)
-        self.send_header('Content-Type', content_type)
-        self.send_header('Content-Length', str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def json_response(self, status, data):
-        self.respond(status, json.dumps(data).encode('utf-8'))
-
-    def do_GET(self):
-        global last_used
-        if self.path == '/status':
-            self.json_response(200, {'running': True, 'loaded_voice': current_voice,
-                                     'idle_timeout_seconds': IDLE_SECONDS})
-        elif self.path == '/voices':
-            last_used = time.monotonic()
-            self.json_response(200, {'voices': voice_names(), 'loaded_voice': current_voice})
-        else:
-            self.json_response(404, {'error': 'Not found'})
-
-    def read_json(self):
-        try:
+        def read_json(self):
             length = int(self.headers.get('Content-Length', '0'))
-        except ValueError:
-            raise ValueError('Invalid Content-Length')
-        if not 0 < length <= MAX_REQUEST:
-            raise ValueError('Invalid request length')
-        data = json.loads(self.rfile.read(length).decode('utf-8'))
-        if not isinstance(data, dict):
-            raise ValueError('Expected a JSON object')
-        return data
+            if not 0 < length <= MAX_REQUEST:
+                raise ValueError('Invalid request length')
+            data = json.loads(self.rfile.read(length).decode('utf-8'))
+            if not isinstance(data, dict):
+                raise ValueError('Expected a JSON object')
+            return data
 
-    def do_POST(self):
-        global last_used, current_voice
-        if self.path not in ('/speak', '/voices/add', '/voices/remove'):
-            self.json_response(404, {'error': 'Not found'})
-            return
-        last_used = time.monotonic()
-        try:
-            data = self.read_json()
-        except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-            self.json_response(400, {'error': str(exc)})
-            return
-        try:
-            if self.path == '/speak':
-                phrase = data.get('text')
-                voice = data.get('voice') or 'default'
-                if not isinstance(phrase, str) or not phrase.strip() or len(phrase) > 10000:
-                    self.json_response(400, {'error': 'Text must contain 1-10000 characters'})
-                    return
-                if not valid_voice(voice):
-                    self.json_response(400, {'error': 'Invalid voice name'})
-                    return
-                if voice == 'default':
-                    if current_voice != 'default':
-                        model.conds = default_conds
-                        current_voice = 'default'
-                        print('Voice changed to built-in default', flush=True)
-                else:
-                    cache = voice_cache(voice)
-                    if not cache.is_file():
-                        self.json_response(404, {'error': f'Unknown voice: {voice}'})
-                        return
-                    if current_voice != voice:
-                        model.conds = Conditionals.load(str(cache), map_location='cpu').to(DEVICE)
-                        current_voice = voice
-                        print(f'Voice changed to {voice}', flush=True)
-                print(f'Generating {len(phrase)} characters ({voice})...', flush=True)
-                audio = model.generate(phrase)
-                buffer = io.BytesIO()
-                torchaudio.save(buffer, audio.cpu(), model.sr, format='wav')
-                self.respond(200, buffer.getvalue(), 'audio/wav')
-
-            elif self.path == '/voices/add':
-                name = data.get('name')
-                source = data.get('path')
-                if name == 'default':
-                    self.json_response(400, {'error': 'The built-in default voice cannot be replaced or removed'})
-                    return
-                if not valid_voice(name):
-                    self.json_response(400, {'error': 'Name must be 1-40 characters: letters, numbers, underscore or hyphen; start with letter/number'})
-                    return
-                if not isinstance(source, str) or not source.lower().endswith('.wav'):
-                    self.json_response(400, {'error': 'Reference must be a WAV file'})
-                    return
-                src = Path(source).resolve()
-                if not src.is_file():
-                    self.json_response(404, {'error': f'Audio file not found: {src}'})
-                    return
-                cache = voice_cache(name)
-                dest = voice_wav(name)
-                if cache.exists() or dest.exists():
-                    self.json_response(409, {'error': f'Voice {name} already exists; remove it first to replace it'})
-                    return
-                # Prepare in memory first. Any failure leaves the other voices unaffected.
-                previous_conds = model.conds
-                try:
-                    model.prepare_conditionals(str(src))
-                    temp = VOICES / (name + '_prompt.tmp.pt')
-                    try:
-                        model.conds.save(str(temp))
-                        # Preserve original reference in the managed voices folder.
-                        shutil.copy2(src, dest)
-                        temp.replace(cache)
-                    except Exception:
-                        temp.unlink(missing_ok=True)
-                        dest.unlink(missing_ok=True)
-                        raise
-                finally:
-                    model.conds = previous_conds
-                # Do not change current_voice: its cached conditionals remain resident.
-                self.json_response(200, {'added': name, 'cache': str(cache)})
-                print(f'Cached voice: {name}', flush=True)
-
-            elif self.path == '/voices/remove':
-                name = data.get('name')
-                if name == 'default':
-                    self.json_response(400, {'error': 'The built-in default voice cannot be replaced or removed'})
-                    return
-                if not valid_voice(name):
-                    self.json_response(400, {'error': 'Invalid voice name'})
-                    return
-                cache = voice_cache(name)
-                if not cache.is_file():
-                    self.json_response(404, {'error': f'Unknown voice: {name}'})
-                    return
-                cache.unlink()
-                # Only remove WAV owned by this voice profile (not other user files).
-                voice_wav(name).unlink(missing_ok=True)
-                if current_voice == name:
-                    model.conds = default_conds
-                    current_voice = 'default'
-                self.json_response(200, {'removed': name})
-                print(f'Removed voice: {name}', flush=True)
-        except Exception as exc:
-            traceback.print_exc()
-            self.json_response(500, {'error': str(exc)})
-        finally:
+        def do_POST(self):
+            nonlocal last_used
+            if self.path not in ('/speak', '/voices/add', '/voices/remove'):
+                self.json_response(404, {'error': 'Not found'})
+                return
             last_used = time.monotonic()
+            try:
+                data = self.read_json()
+                name = data.get('voice', 'default') if self.path == '/speak' else data.get('name')
+                if not isinstance(name, str) or not VOICE_NAME.fullmatch(name):
+                    raise ValueError('Invalid voice name')
+                if self.path == '/speak':
+                    text = data.get('text')
+                    if not isinstance(text, str) or not text.strip() or len(text) > 10000:
+                        raise ValueError('Text must contain 1-10000 characters')
+                    self.respond(200, backend.synthesise(text, name), 'audio/wav')
+                else:
+                    if name == 'default':
+                        raise ValueError('The built-in default voice is reserved')
+                    if not runtime['capabilities'].get('voiceCloning', False):
+                        raise NotImplementedError('This engine does not support reference-recording voices')
+                    if self.path == '/voices/add':
+                        source = data.get('path')
+                        if not isinstance(source, str):
+                            raise ValueError('A reference WAV path is required')
+                        backend.add_voice(name, source)
+                        self.json_response(200, {'added': name})
+                    else:
+                        backend.remove_voice(name)
+                        self.json_response(200, {'removed': name})
+            except (ValueError, UnicodeDecodeError) as exc:
+                self.json_response(400, {'error': str(exc)})
+            except FileNotFoundError as exc:
+                self.json_response(404, {'error': str(exc)})
+            except FileExistsError as exc:
+                self.json_response(409, {'error': str(exc)})
+            except NotImplementedError as exc:
+                self.json_response(501, {'error': str(exc)})
+            except Exception:
+                traceback.print_exc()
+                self.json_response(500, {'error': 'Speech operation failed; check the local service log'})
+            finally:
+                last_used = time.monotonic()
 
-    def log_message(self, fmt, *args):
-        print('%s %s' % (self.address_string(), fmt % args), flush=True)
+        def log_message(self, fmt, *args):
+            print('%s %s' % (self.address_string(), fmt % args), flush=True)
+
+    server = None
+    try:
+        server = HTTPServer(('127.0.0.1', port), Handler)
+        server.timeout = 1
+        print(f"Speech engine {runtime['engine']} ready on port {port}", flush=True)
+        while idle_seconds == 0 or time.monotonic() - last_used < idle_seconds:
+            server.handle_request()
+    finally:
+        if server is not None:
+            server.server_close()
+        backend.close()
 
 
-server = HTTPServer((HOST, PORT), Handler)
-server.timeout = 1
-try:
-    while IDLE_SECONDS == 0 or time.monotonic() - last_used < IDLE_SECONDS:
-        server.handle_request()
-finally:
-    server.server_close()
-    print('Service stopped; releasing GPU memory.', flush=True)
+def main():
+    root = Path(os.environ.get('AGENT_STACK_TTS_ROOT', str(Path(__file__).resolve().parent.parent))).resolve()
+    port = int(os.environ.get('AGENT_STACK_TTS_PORT', '18765'))
+    idle_seconds = int(os.environ.get('AGENT_STACK_TTS_IDLE_SECONDS', '600'))
+    if not 1 <= port <= 65535 or idle_seconds < 0:
+        raise ValueError('Invalid speech port or idle timeout')
+    backend, runtime = load_backend(root)
+    serve(root, backend, runtime, port, idle_seconds)
+
+
+if __name__ == '__main__':
+    main()

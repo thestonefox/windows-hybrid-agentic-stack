@@ -2,6 +2,9 @@
 # Embedded setup selection and preview. No writes are performed here.
 param(
     [string]$DefaultsJson,
+    [string]$StrategyCatalogJson,
+    [string]$TtsEngine,
+    [bool]$Interactive,
     [string]$ConfigPath,
     [string]$InstallPath,
     [bool]$Cloud,
@@ -30,7 +33,19 @@ $InstallPath = [Environment]::ExpandEnvironmentVariables($InstallPath)
 if ($InstallPath -match '^\$HOME(?=[\\/]|$)') { $InstallPath = $HOME + $InstallPath.Substring(5) }
 $InstallPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallPath)
 $config.installation.directory = $InstallPath
-if ($Voice -and $config.tts.engine -ne 'chatterbox-turbo') { throw "Unsupported TTS engine: $($config.tts.engine)" }
+if ($TtsEngine -and -not $Voice) { throw '--tts-engine requires --voice.' }
+if ($TtsEngine) { $config.tts.engine = $TtsEngine }
+$engineManifest = $null
+if ($Voice) {
+    $catalog = $StrategyCatalogJson | ConvertFrom-Json
+    if ($Interactive -and -not $TtsEngine -and -not $ConfigPath) {
+        $config.tts.engine = Select-TtsEngine -Manifests @($catalog | ForEach-Object { $_ }) -Default $config.tts.engine
+    }
+    $selectedManifests = @($catalog | Where-Object { $_.id -ceq $config.tts.engine })
+    if ($selectedManifests.Count -ne 1) { throw "TTS strategy unavailable: $($config.tts.engine)" }
+    $engineManifest = $selectedManifests[0]
+    if ($config.tts.device -ne 'auto' -and $config.tts.device -notin $engineManifest.devices) { throw 'Device unsupported by selected strategy.' }
+}
 if ($ShowPlan) {
     Write-Host 'Installation preview'
     Write-Host "Directory:    $InstallPath"
@@ -45,7 +60,12 @@ if ($ShowPlan) {
     if ($Voice) {
         Write-Host "TTS engine:   $($config.tts.engine)"
         Write-Host "TTS device:   $($config.tts.device)"
+        Write-Host "TTS package:  $($engineManifest.name) $($engineManifest.version); licence: $($engineManifest.license)"
+        foreach ($model in $engineManifest.models) {
+            $pin = if ($model.revision) { "revision $($model.revision)" } else { "SHA256 $($model.sha256)" }
+            Write-Host "Model download: $($model.source), $pin; licence: $($model.license)"
+        }
     }
     Write-Host 'Preview complete. No changes made.'
 }
-[pscustomobject]@{ Cloud = $Cloud; Local = $Local; Voice = $Voice; InstallPath = $InstallPath; ConfigJson = ($config | ConvertTo-Json -Depth 50) }
+[pscustomobject]@{ Cloud = $Cloud; Local = $Local; Voice = $Voice; InstallPath = $InstallPath; StrategyManifestJson = ($engineManifest | ConvertTo-Json -Depth 12 -Compress); ConfigJson = ($config | ConvertTo-Json -Depth 50) }

@@ -24,6 +24,8 @@ try {
     . (Get-StackSetupScript (Join-Path $PSScriptRoot 'scripts\installation-state.ps1'))
     . (Get-StackSetupScript (Join-Path $PSScriptRoot 'scripts\command-registration.ps1'))
     . (Get-StackSetupScript (Join-Path $PSScriptRoot 'scripts\uninstall.ps1'))
+    $ttsHelper = Join-Path $PSScriptRoot 'tts/strategy-management.ps1'
+    if (Test-Path -LiteralPath $ttsHelper) { . (Get-StackSetupScript $ttsHelper) }
     if ([string]::IsNullOrWhiteSpace($InstallPath)) {
         $registration = Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack\commands.json'
         if (Test-Path -LiteralPath (Join-Path $PSScriptRoot '.whas-installation.json')) { $InstallPath = $PSScriptRoot }

@@ -67,13 +67,13 @@ try {
         'scripts\setup-preview.ps1','scripts\configuration.ps1','config\defaults.json','config\AGENTS.md','scripts\script-invocation.ps1',
         'scripts\setup-agents.ps1','scripts\install-agent-commands.ps1','scripts\command-registration.ps1','scripts\profile-loader.ps1',
         'scripts\config.ps1','scripts\agent-commands.ps1','scripts\installation-state.ps1','scripts\uninstall.ps1',
-        'tts\install-tts.ps1','tts\tts.ps1','tts\tts_service.py')) {
+        'tts\install-tts.ps1','tts\tts.ps1','tts\tts_service.py', 'tts\strategy-management.ps1', 'tts\strategy.schema.json', 'tts\strategies\chatterbox-turbo\manifest.json', 'tts\strategies\chatterbox-turbo\install.ps1', 'tts\strategies\chatterbox-turbo\uninstall.ps1', 'tts\strategies\chatterbox-turbo\backend.py', 'tts\strategies\chatterbox-turbo\requirements.txt', 'tts\strategies\chatterbox-turbo\prepare_model.py')) {
         $destination = Join-Path $source $relative
         [IO.Directory]::CreateDirectory((Split-Path -Parent $destination)) | Out-Null
         Copy-Item -LiteralPath (Join-Path $repo $relative) -Destination $destination
     }
     [IO.File]::WriteAllText((Join-Path $source 'scripts\check-prerequisites.ps1'), @'
-param([switch]$Cloud,[switch]$Local,[switch]$Voice)
+param([switch]$Cloud,[switch]$Local,[switch]$Voice,[string]$StrategyManifestJson)
 Write-Host "CHECK Cloud=$Cloud Local=$Local Voice=$Voice POLICY=$(Get-ExecutionPolicy)"
 'CHECK PIPELINE OUTPUT'
 if ($env:WHAS_TEST_PREREQUISITE_FAIL -eq '1') { exit 1 }
@@ -89,7 +89,7 @@ if (-not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) '
 exit 0
 '@)
     [IO.File]::WriteAllText((Join-Path $source 'tts\install-tts.ps1'), @'
-param([string]$InstallPath,[string]$Device)
+param([string]$InstallPath,[string]$Device,[string]$TtsEngine)
 if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'tts_service.py'))) { throw 'Missing bundled speech service' }
 [IO.Directory]::CreateDirectory((Join-Path $InstallPath 'tts')) | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'tts.ps1') -Destination (Join-Path $InstallPath 'tts\tts.ps1')

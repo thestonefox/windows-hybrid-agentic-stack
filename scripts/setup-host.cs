@@ -13,6 +13,7 @@ namespace WindowsHybridAgenticStack {
             Console.WriteLine("  --plan                 Preview selected components and destination");
             Console.WriteLine("  --check                Check selected prerequisites without installing");
             Console.WriteLine("  --cloud --local --voice Select components (default: bundled configuration)");
+            Console.WriteLine("  --tts-engine ID        Select a bundled TTS strategy (requires --voice)");
             Console.WriteLine("  --config PATH          Read JSON configuration overrides");
             Console.WriteLine("  --install-path PATH    Choose an installation destination");
             Console.WriteLine("  --install              Install selected cloud, local and voice components");
@@ -53,7 +54,7 @@ namespace WindowsHybridAgenticStack {
         }
 
         private static int Run(string[] args) {
-            string mode = null, config = null, path = null;
+            string mode = null, config = null, path = null, ttsEngine = null;
             bool cloud = false, local = false, voice = false;
             bool yes = false, apply = false, noPath = false, removeModels = false;
             foreach (string value in args) if (value == null) throw new ArgumentException("Invalid argument.");
@@ -65,6 +66,10 @@ namespace WindowsHybridAgenticStack {
                 } else if (option == "--cloud") cloud = true;
                 else if (option == "--local") local = true;
                 else if (option == "--voice") voice = true;
+                else if (option == "--tts-engine") {
+                    if (ttsEngine != null) throw new ArgumentException("Duplicate --tts-engine option.");
+                    ttsEngine = Next(args, ref i);
+                }
                 else if (option == "--yes") yes = true;
                 else if (option == "--apply") apply = true;
                 else if (option == "--no-path") noPath = true;
@@ -83,8 +88,9 @@ namespace WindowsHybridAgenticStack {
             if (removeModels && mode != "--uninstall") throw new ArgumentException("--remove-managed-models requires --uninstall.");
             if (yes && mode != "--install" && !(mode == "--uninstall" && apply)) throw new ArgumentException("--yes requires installation or applied uninstall.");
             if (noPath && mode != "--install" && mode != "--uninstall") throw new ArgumentException("--no-path requires install or uninstall.");
+            if (ttsEngine != null && !voice) throw new ArgumentException("--tts-engine requires --voice.");
             if (mode == "--uninstall") {
-                if (cloud || local || voice || config != null) throw new ArgumentException("Uninstall does not accept component or configuration flags.");
+                if (cloud || local || voice || config != null || ttsEngine != null) throw new ArgumentException("Uninstall does not accept component or configuration flags.");
                 Hashtable arguments = new Hashtable { { "Apply", apply }, { "PersistCommandPath", !noPath }, { "RemoveManagedModels", removeModels } };
                 if (path != null) arguments.Add("InstallPath", path);
                 if (yes) arguments.Add("Confirm", false);
@@ -102,8 +108,15 @@ namespace WindowsHybridAgenticStack {
                     if (ps.HadErrors) throw new InvalidOperationException(ps.Streams.Error[0].ToString());
                     ps.Commands.Clear();
                     ps.Streams.Error.Clear();
+                    ps.AddScript(SetupPayload.StrategyHelper, false);
+                    ps.Invoke();
+                    if (ps.HadErrors) throw new InvalidOperationException(ps.Streams.Error[0].ToString());
+                    ps.Commands.Clear();
+                    ps.Streams.Error.Clear();
                     ps.AddScript(SetupPayload.Preview, true)
                         .AddParameter("DefaultsJson", SetupPayload.Defaults)
+                        .AddParameter("StrategyCatalogJson", SetupPayload.StrategyCatalog).AddParameter("TtsEngine", ttsEngine)
+                        .AddParameter("Interactive", mode == "--install" && !yes)
                         .AddParameter("ConfigPath", config).AddParameter("InstallPath", path)
                         .AddParameter("Cloud", cloud).AddParameter("Local", local).AddParameter("Voice", voice)
                         .AddParameter("ShowPlan", mode == "--plan");
@@ -121,6 +134,7 @@ namespace WindowsHybridAgenticStack {
                         .AddParameter("Cloud", (bool)selection[0].Properties["Cloud"].Value)
                         .AddParameter("Local", (bool)selection[0].Properties["Local"].Value)
                         .AddParameter("Voice", (bool)selection[0].Properties["Voice"].Value)
+                        .AddParameter("StrategyManifestJson", LanguagePrimitives.ConvertTo<string>(selection[0].Properties["StrategyManifestJson"].Value))
                         .AddCommand("Out-Default");
                     ps.Invoke();
                     if (host.ExitRequested) return host.ExitCode;

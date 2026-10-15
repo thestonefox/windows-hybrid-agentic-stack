@@ -160,6 +160,8 @@ namespace WindowsHybridAgenticStack {
                         Load(ps, Path.Combine(root, "scripts", "agent-commands.ps1"), root);
                     }
                     string tts = Path.Combine(root, "tts", "tts.ps1");
+                    string strategies = Path.Combine(root, "tts", "strategy-management.ps1");
+                    if (File.Exists(strategies)) Load(ps, strategies, null);
                     if (!isAgent || File.Exists(tts)) Load(ps, tts, root);
                     ps.Commands.Clear();
                     ps.Streams.Error.Clear();
