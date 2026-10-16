@@ -7,7 +7,7 @@ try {
     $inputs='A'*64
     [IO.File]::WriteAllText((Join-Path $fixture 'scripts/build-setup.ps1'),"param([switch]`$Fingerprint,[switch]`$Force); if(-not `$Fingerprint){throw 'Verification attempted compilation'}; '$inputs'")
     $exe=Join-Path $fixture 'whas-gui.exe'
-    $manifest=Join-Path $fixture 'whas-gui.build.json'
+    $manifest=Join-Path $fixture 'whas-gui.manifest.json'
     [IO.File]::WriteAllText($exe,'Inert checksum fixture; never executed.')
     $metadata=[ordered]@{schemaVersion=1;inputsSHA256=$inputs;executableSHA256=(Get-FileHash $exe).Hash;platform='windows-x64';signed=$false}
     $metadata|ConvertTo-Json|Set-Content -LiteralPath $manifest

@@ -7,12 +7,13 @@
     is separate from antivirus scanning and publisher verification.
 #>
 [CmdletBinding()]
-param([string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot))
+param([string]$RepositoryRoot)
+if (-not $RepositoryRoot) { $RepositoryRoot = Split-Path -Parent $PSScriptRoot }
 $ErrorActionPreference='Stop'
 if ($PSVersionTable.PSVersion.Major -ne 5 -or -not [Environment]::Is64BitProcess) { throw 'Verify using 64-bit Windows PowerShell 5.1.' }
 $root=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($RepositoryRoot)
 $exe=Join-Path $root 'whas-gui.exe'
-$manifest=Join-Path $root 'whas-gui.build.json'
+$manifest=Join-Path $root 'whas-gui.manifest.json'
 foreach($file in @($exe,$manifest)) {
     if(-not(Test-Path -LiteralPath $file -PathType Leaf)) { throw 'Bundled GUI or its build manifest is missing.' }
     if((Get-Item -LiteralPath $file -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Bundled GUI files must not be links.' }

@@ -38,7 +38,7 @@ installed separately.
 
 ## Bundled executable in source downloads
 
-The repository tracks `whas-gui.exe` and `whas-gui.build.json`, so Git clones
+The repository tracks `whas-gui.exe` and `whas-gui.manifest.json`, so Git clones
 and **Code > Download ZIP** include the graphical entry point. It provides
 first-run feature setup and later usage, settings and removal. `whas.exe`
 remains the installed CLI. No separate graphical setup EXE is required.

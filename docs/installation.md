@@ -655,7 +655,7 @@ External prerequisites are still required for the selected features.
 The repository includes the built `whas-gui.exe` at its root, so cloning or
 **Code > Download ZIP** provides it alongside the PowerShell scripts. No build
 is required: extract the ZIP and double-click the EXE. The adjacent
-`whas-gui.build.json` records its source fingerprint and SHA-256 checksum.
+`whas-gui.manifest.json` records its source fingerprint and SHA-256 checksum.
 
 For developer builds, use 64-bit Windows PowerShell 5.1:
 
@@ -697,7 +697,7 @@ Get-FileHash -LiteralPath .\whas-gui.exe -Algorithm SHA256
 A matching checksum confirms the bytes match the published value; it is not a
 publisher signature or a guarantee of safety. Do not run a file whose checksum
 differs. For the repository's bundled EXE, compare against `executableSHA256`
-in `whas-gui.build.json`. A versioned GitHub Release is not yet published.
+in `whas-gui.manifest.json`. A versioned GitHub Release is not yet published.
 
 An antivirus malware detection is different from an unsigned-publisher or
 SmartScreen reputation warning. Do not restore a quarantined build, add an

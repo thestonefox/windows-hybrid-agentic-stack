@@ -135,7 +135,7 @@ For multiple local models, see [model selection](cli.md#local-model-selection).
 
 Use `whas-gui.exe` from the extracted repository ZIP. No build is required.
 You can also copy just this EXE to another PC; it embeds setup and does not
-need the source checkout there. Keep `whas-gui.build.json` if you want to
+need the source checkout there. Keep `whas-gui.manifest.json` if you want to
 compare its published checksum. See [verification](installation.md#unsigned-exe-and-windows-warnings).
 
 The EXE is **unsigned**; read [Windows warnings and verification](installation.md#unsigned-exe-and-windows-warnings).
