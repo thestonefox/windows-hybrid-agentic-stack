@@ -139,6 +139,30 @@ the proposed unified CLI, contextual chat and graphical interfaces.
   keeping speech synthesis and final-answer extraction correct. Streaming is
   an additional capability, not a replacement for silent-wait feedback.
 
+### Diagnose actual latency as well as showing activity
+
+The user reports unexpectedly slow cloud requests as well as local requests.
+Do not assume a cloud-model delay, accept all latency as normal, or consider a
+spinner a performance fix. Confirm the effective provider/model identifier;
+do not infer it from the model used in this development chat.
+
+Source inspection confirms the ordinary answer path stores text events and
+prints the extracted answer only after `opencode run` exits, then calls speech
+synchronously when requested. The native command host also loads TTS helpers
+when present even for agent calls without speech. These are investigation
+targets; their contribution to the observed delay has not been measured.
+
+- [ ] Measure wrapper startup/helper validation, OpenCode startup, time to first
+  answer event, completion, TTS readiness, synthesis and playback separately.
+- [ ] Compare the wrapper with direct OpenCode using the same simple prompt,
+  effective model/configuration and permissions, with speech disabled first.
+- [ ] Compare cold and warm runs, then add speech and measure the extra cost.
+- [ ] Avoid expensive speech/helper initialization on text-only requests where
+  feasible, while retaining required integrity and permission checks.
+- [ ] Assess safe earlier answer display/streaming independently of model speed.
+- [ ] Record measured results and fix avoidable overhead; distinguish provider
+  wait, wrapper overhead and speech cost in user-facing diagnostics.
+
 ### Acceptance
 
 - [ ] Exercise delayed local and cloud responses, cold/warm model startup, delayed
