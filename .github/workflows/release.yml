@@ -1,0 +1,37 @@
+name: Draft Windows release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/windows-build.yml
+    permissions:
+      contents: read
+  draft:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download tested assets and create a draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo 'Invalid version tag'; exit 1; }
+          gh run download "$WORKFLOW_RUN_ID" --name whas-windows-x64 --dir release-assets
+          cd release-assets
+          sha256sum --check SHA256SUMS.txt
+          printf '%s\n' 'Unsigned Windows x64 setup. Windows may warn about an unknown publisher or block execution.' 'The ZIP includes installation guides and licence notices. Verify SHA256SUMS.txt before running setup.' > release-notes.txt
+          gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG" --notes-file release-notes.txt whas-setup.exe whas-windows-x64-*.zip SHA256SUMS.txt

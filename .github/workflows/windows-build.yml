@@ -1,0 +1,45 @@
+name: Windows setup build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Run isolated tests
+        run: .\scripts\test.ps1
+      - name: Build unsigned setup and checksums
+        env:
+          BUILD_REF: ${{ github.ref_name }}
+          BUILD_REF_TYPE: ${{ github.ref_type }}
+        run: |
+          $version = if ($env:BUILD_REF_TYPE -eq 'tag') { $env:BUILD_REF } else { 'development' }
+          .\scripts\build-release.ps1 -Version $version
+      - name: Upload setup assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: whas-windows-x64
+          path: |
+            dist/release/whas-setup.exe
+            dist/release/whas-windows-x64-*.zip
+            dist/release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
