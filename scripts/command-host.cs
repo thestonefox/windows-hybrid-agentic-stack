@@ -19,7 +19,20 @@ namespace WindowsHybridAgenticStack {
         public override string ReadLine() { return Console.ReadLine(); }
         public override SecureString ReadLineAsSecureString() { throw new NotSupportedException("Secure input is not used by stack commands."); }
         public override void Write(string value) { Console.Write(value); }
-        public override void Write(ConsoleColor foreground, ConsoleColor background, string value) { Console.Write(value); }
+        public override void Write(ConsoleColor foreground, ConsoleColor background, string value) {
+            if (Console.IsOutputRedirected) { Console.Write(value); return; }
+            ConsoleColor previousForeground = Console.ForegroundColor;
+            ConsoleColor previousBackground = Console.BackgroundColor;
+            try {
+                Console.ForegroundColor = foreground;
+                Console.BackgroundColor = background;
+                Console.Write(value);
+            }
+            finally {
+                Console.ForegroundColor = previousForeground;
+                Console.BackgroundColor = previousBackground;
+            }
+        }
         public override void WriteLine(string value) { Console.WriteLine(value); }
         public override void WriteErrorLine(string value) { Console.Error.WriteLine(value); }
         public override void WriteDebugLine(string value) { Console.Error.WriteLine(value); }

@@ -306,40 +306,6 @@ catch {
     Add-Check 'Execution policy' 'WARN' $_.Exception.Message $false
 }
 
-# OpenCode is required by cloud and local agents.
-if ($Cloud -or $Local) {
-    $openCode = Test-VersionCommand 'opencode.exe'
-
-    if ($openCode) {
-        Add-Check 'OpenCode' 'PASS' $openCode $true
-    }
-    else {
-        Add-Check 'OpenCode' 'FAIL' 'OpenCode CLI not available or failed its version check.' $true
-    }
-}
-
-# Cloud model access cannot be fully verified without authentication.
-if ($Cloud) {
-    Add-Check 'Cloud provider access' 'INFO' 'Authentication and model access must be verified during setup.' $false
-}
-
-# Ollama
-if ($Local) {
-    $ollama = Test-VersionCommand 'ollama.exe'
-
-    if ($ollama) {
-        if ($ollama -match '(?is)client version is') {
-            Add-Check 'Ollama' 'WARN' $ollama $true
-        }
-        else {
-            Add-Check 'Ollama' 'PASS' $ollama $true
-        }
-    }
-    else {
-        Add-Check 'Ollama' 'FAIL' 'Ollama CLI not available or failed its version check.' $true
-    }
-}
-
 # Python, Visual C++ and NVIDIA are relevant only to TTS.
 if ($Voice) {
     if ($StrategyManifestJson) { $strategy = $StrategyManifestJson | ConvertFrom-Json }
@@ -352,7 +318,6 @@ if ($Voice) {
     $pythonVersion = [string]$strategy.prerequisites.python
     $pythonParts = $pythonVersion.Split('.')
     $pythonMajor = [int]$pythonParts[0]; $pythonMinor = [int]$pythonParts[1]
-    Add-Check 'Speech engine' 'INFO' $strategy.name $false
     $pythons = @(Get-PythonInstallations)
 
     # Verify the precise interpreter declared by the selected strategy.
@@ -440,10 +405,65 @@ if ($Voice) {
         }
 
     }
+}
+
+# OpenCode is required by cloud and local agents.
+if ($Cloud -or $Local) {
+    $openCode = Test-VersionCommand 'opencode.exe'
+
+    if ($openCode) {
+        Add-Check 'OpenCode' 'PASS' $openCode $true
+    }
+    else {
+        Add-Check 'OpenCode' 'FAIL' 'OpenCode CLI not available or failed its version check.' $true
+    }
+}
+
+# Ollama
+if ($Local) {
+    $ollama = Test-VersionCommand 'ollama.exe'
+
+    if ($ollama) {
+        if ($ollama -match '(?is)client version is') {
+            Add-Check 'Ollama' 'WARN' $ollama $true
+        }
+        else {
+            Add-Check 'Ollama' 'PASS' $ollama $true
+        }
+    }
+    else {
+        Add-Check 'Ollama' 'FAIL' 'Ollama CLI not available or failed its version check.' $true
+    }
+}
+
+# Cloud model access cannot be fully verified without authentication.
+if ($Cloud) {
+    Add-Check 'Cloud provider access' 'INFO' 'Authentication and model access must be verified during setup.' $false
+}
+
+if ($Voice) {
     Add-Check 'TTS dependencies' 'INFO' 'The selected strategy installs and verifies its own private dependencies.' $false
 }
 
-$results | Format-Table -AutoSize -Wrap
+$statusColors = @{
+    PASS = 'Green'
+    FAIL = 'Red'
+    WARN = 'Yellow'
+    INFO = 'Cyan'
+}
+
+# Keep PowerShell's table sizing/wrapping and colour only the status word.
+# Write-Host uses the host colour API rather than embedding ANSI in logs.
+$results | Format-Table -AutoSize -Wrap | Out-String -Stream | ForEach-Object {
+    if ($_ -match '^(.+?\s+(?:Yes|No)\s+)(PASS|FAIL|WARN|INFO)(\s+.*)$') {
+        Write-Host $Matches[1] -NoNewline
+        Write-Host $Matches[2] -NoNewline -ForegroundColor $statusColors[$Matches[2]]
+        Write-Host $Matches[3]
+    }
+    else {
+        Write-Host $_
+    }
+}
 
 $failed = @(
     $results | Where-Object {
