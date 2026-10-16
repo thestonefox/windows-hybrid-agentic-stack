@@ -71,6 +71,21 @@ function Show-AgentHelp {
     Write-Host ''
 }
 
+function ConvertTo-AgentAnswer {
+    param([string]$Text, [string]$Prompt)
+    # Remove only the observed OpenCode help footer when echoed as a trailing
+    # standalone block. Keep raw --log events and intentional markup examples.
+    if ($Prompt -match '(?i)system-reminder|Remember to use /help') { return $Text }
+    $pattern = '(?s)(?:\r?\n|\A)[ \t]*<system-reminder>\s*Remember to use /help for assistance or report issues at https://github\.com/anomalyco/opencode/issues\s*</system-reminder>\s*\z'
+    $match = [regex]::Match($Text, $pattern)
+    if (-not $match.Success) { return $Text }
+    $answer = $Text.Substring(0, $match.Index)
+    # A trailing example inside an unclosed Markdown fence is user content.
+    if (([regex]::Matches($answer, '(?m)^\s*```').Count % 2) -or
+        ([regex]::Matches($answer, '(?m)^\s*~~~').Count % 2)) { return $Text }
+    return $answer.TrimEnd()
+}
+
 function Invoke-AgentStackTask {
     param(
         [Parameter(Mandatory = $true)]
@@ -347,7 +362,10 @@ function Invoke-AgentStackTask {
                         $eventData.type -eq 'text' -and
                         $eventData.part.text
                     ) {
-                        $lastText = [string]$eventData.part.text
+                        if (-not $eventData.part.synthetic) {
+                            $answerText = ConvertTo-AgentAnswer -Text ([string]$eventData.part.text) -Prompt $prompt
+                            if (-not [string]::IsNullOrWhiteSpace($answerText)) { $lastText = $answerText }
+                        }
                     }
 
                     if ($eventData.type -eq 'error') {
