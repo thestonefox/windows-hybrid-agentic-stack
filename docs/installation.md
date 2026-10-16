@@ -783,6 +783,17 @@ Each PC has one active root. Selecting another `-InstallPath` switches local reg
 
 ### Finish installation and check commands
 
+Both source and EXE installations include the unified `whas` command,
+`whas-gui.exe` and graphical maintenance through `whas-setup.exe` in the
+installation folder. See [graphical workflows](gui.md) and
+[shared CLI settings](cli.md). Opening setup without arguments shows its GUI;
+explicit `--install`, `--check`, `--plan` and `--uninstall` retain console use.
+
+Setup can select multiple local models and a separate default with
+`-LocalModels`/`-DefaultLocalModel` or the equivalent EXE options. See
+[local model selection](cli.md#local-model-selection). `-DefaultLocation` /
+`--default-location` selects the initial local/cloud request route.
+
 After either installation route completes, refresh PATH in your original
 PowerShell window:
 

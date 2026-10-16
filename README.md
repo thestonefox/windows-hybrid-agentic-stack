@@ -22,18 +22,24 @@ warning. See [EXE setup and verification](docs/installation.md#standalone-execut
 
 | Command | Purpose |
 |---|---|
-| `agent` | Cloud agent with read-only permissions |
-| `agentdo` | Cloud agent with write-capable permissions |
-| `localagent` | Local Ollama agent with read-only permissions |
-| `localagentdo` | Local Ollama agent with write-capable permissions |
+| `whas ask`, `askl`, `askc` | Independent restricted questions; default, local or cloud |
+| `whas perform`, `performl`, `performc` | Independent tool-enabled tasks |
+| `whas chat`, `chatl`, `chatc` | Contextual conversations |
+| `whas configure` | Shared CLI and GUI settings |
 | `tts-say` | Generate and play speech locally |
 
 Cloud commands inherit your OpenCode model selection by default. Add `-v` to an
-agent command to speak its response when speech is installed.
+agent command, or `--voice` to `whas ask`/`perform`, to speak its response.
+The existing `agent`, `localagent`, `agentdo` and `localagentdo` commands remain
+available. Open `whas-gui.exe` in the installation folder for graphical use;
+opening `whas-setup.exe` without arguments starts graphical setup/uninstall.
 
 ## Documentation
 
 - [Troubleshooting](docs/troubleshooting.md)
+- [Unified commands and shared settings](docs/cli.md)
+- [Graphical setup, usage and configuration](docs/gui.md)
+- [Agent runtimes, sessions and strategy authoring](docs/agent-strategies.md)
 - [TTS engine management and strategy authoring](docs/tts-strategies.md)
 - Engine guides: [Chatterbox](docs/tts/chatterbox-turbo.md), [Piper](docs/tts/piper-tts.md), [F5](docs/tts/f5-tts.md)
 - [Builds and releases](docs/releases.md)
@@ -47,6 +53,6 @@ limited to 72 characters.
 
 ## License
 
-See [LICENSE](LICENSE). TTS packages and models have their own licenses; see
+See [LICENSE](LICENSE). Agent runtimes, TTS packages and models have their own licenses; see
 [TTS strategies](docs/tts-strategies.md), including the noncommercial restriction
 on F5 pretrained weights.

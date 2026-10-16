@@ -182,3 +182,29 @@ Select `f5-tts` explicitly; Chatterbox remains the default. Use Python 3.11 x64 
 Custom voices require a mono 3-12 second WAV and a matching UTF-8 `.txt` transcript beside it. The transcript must contain the words actually spoken. Missing transcripts are rejected rather than automatically downloading an ASR model. List/remove commands manage the installed WAV/text pair. Main uninstall preserves personal voices.
 
 A model hash mismatch preserves the existing file and stops installation. Review it or choose a fresh installation directory; do not edit ownership hashes or disable certificate verification. Runtime inference uses local models only. CPU generation can take substantially longer than Piper. The native speech command waits up to 180 seconds per request; use shorter text or CUDA for long responses. Inspect the private service logs for an actual failure before treating slow inference as an install failure.
+
+## Unified commands and graphical operations
+
+Additional runtime integrations remain deferred pending agreement.
+
+An interactive native command shows activity during model waits, speech and
+large ownership operations. Piped answer output deliberately stays plain.
+Progress reports work actually observed; it cannot estimate a provider's time
+to first answer. Large Python/Node environments may contain tens of thousands
+of files. Scanning, hashing and removing those files can take several minutes.
+
+If a GUI operation fails, read the details and preserve the ownership record.
+Cancellation is not rollback. A cancelled installation/removal may leave files
+for a repeat operation or reviewed cleanup. Do not change execution policy,
+delete metadata, disable integrity checks or remove unrelated Python/Ollama
+installations to repair it.
+
+Session continuation requires the same runtime, user, workspace and local/cloud
+route as its WHAS association. Start a new conversation when switching these.
+For external native sessions use the runtime's own session interface. Forgetting
+a WHAS association leaves native history and memory intact. See
+[agent strategy guidance](agent-strategies.md#sessions-and-memory).
+
+The GUI reads shared settings when opened and through **Reload shared settings**.
+Reload after CLI edits before saving a conflicting edit. Voice lists also have
+an explicit refresh action; unsupported cloning operations stay disabled.

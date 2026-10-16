@@ -1,12 +1,12 @@
 # Planned CLI, agent and graphical interface work
 
-This is the implementation checklist for the agreed direction. Items below are
-planned unless explicitly marked complete. Examples describe proposed commands;
-they must not be presented as commands available in the current release.
+This records the agreed scope, decisions and acceptance checks. Checked items
+have supporting implementation/tests; unchecked acceptance cases remain open.
+Use the CLI, GUI and agent guides for commands available in this implementation.
 
 ## Work boundary and current status
 
-- [ ] Wait for the user to confirm their installation, testing and uninstallation
+- [x] Wait for the user to confirm their installation, testing and uninstallation
   are complete before changing installation or runtime code or running installs.
 - Documentation of this plan can proceed during that wait.
 - Keep changes local. Do not push, publish releases or create tags without an
@@ -20,10 +20,17 @@ they must not be presented as commands available in the current release.
   actual validation and limitations in the relevant commit descriptions.
 - Update this document when a decision changes or a missing case is discovered.
 
-Already implemented: prerequisite checks through `install.ps1 -Check`, improved
-uninstall progress, multiple TTS engines and their management commands, and
-unsigned console setup/release packaging. The current EXE is a console installer.
-The unified CLI and graphical interfaces below are not implemented.
+Implemented: unified commands, shared settings, the OpenCode strategy,
+scoped sessions, multiple local models, graphical setup and voice management.
+
+Additional runtime integrations remain deferred pending agreement.
+
+The 10,000-entry ownership fixture measured 158 ms cold and 9 ms cached in the
+final full suite. These measure ownership processing, not provider/model speed.
+Source and full-history secret scans passed; commit identities use a GitHub
+noreply address. Evidence and Sandbox files remain outside the repository.
+
+Additional runtime integrations remain deferred pending agreement.
 
 ## 1. Fix the silent final installation stage first
 
@@ -38,21 +45,21 @@ claim that installation progress was complete was inaccurate.
 
 ### Required work
 
-- [ ] Announce finalisation before it starts, explaining that installed files are
+- [x] Announce finalisation before it starts, explaining that installed files are
   being recorded for safe uninstall.
-- [ ] Pass progress through tree enumeration and file hashing, including inside
+- [x] Pass progress through tree enumeration and file hashing, including inside
   large individual files. Report phase, completed count, total when known and
   elapsed time. Use the existing progress helpers where suitable.
-- [ ] Cover initial ownership scans and repeat-install verification as well as
+- [x] Cover initial ownership scans and repeat-install verification as well as
   successful finalisation and interrupted-install tracking.
 - [ ] Review every lengthy install/uninstall phase for the same silence:
   dependency installation, model download/verification, strategy hooks, command
   compilation/registration, ownership checks, file removal and receipt writing.
 - [ ] Give slow subprocess operations visible output or periodic activity with
   elapsed time. A phase announcement alone does not solve a long silent wait.
-- [ ] Throttle output to useful intervals, approximately every two seconds for
+- [x] Throttle output to useful intervals, approximately every two seconds for
   long operations. Do not invent percentages or estimated completion times.
-- [ ] Preserve failure exit codes, interrupted-install recovery and ownership
+- [x] Preserve failure exit codes, interrupted-install recovery and ownership
   verification. Do not skip hashes to make installation look faster.
 
 ### Acceptance
@@ -85,15 +92,15 @@ contribute. Measure the stages before claiming the root cause is proven.
 - [ ] After the manual test finishes, time native startup, helper loading, state
   parsing/validation, HTTP probes, runtime selection and process checks separately.
 - [ ] Reproduce with a realistic large ownership record as well as small fixtures.
-- [ ] Reuse one status result and validated state within an invocation where safe.
+- [x] Reuse one status result and validated state within an invocation where safe.
   Avoid repeatedly traversing the full installation record for a simple status.
-- [ ] Retain ownership, runtime identity, path and process checks; do not remove
+- [x] Retain ownership, runtime identity, path and process checks; do not remove
   protections merely to improve timings. Define safe invalidation if using caches.
 - [ ] Bound the total status wait, not just individual HTTP calls. Distinguish
   stopped, loading, responsive, unresponsive and conflicting service states.
 - [ ] Return promptly when the service is absent or unresponsive. Give visible
   activity if a legitimate check exceeds the normal response interval.
-- [ ] Status must never load speech models, switch engines or start/stop services.
+- [x] Status must never load speech models, switch engines or start/stop services.
 - [ ] Test fresh native commands, stopped/loading/ready/unresponsive services,
   stale PIDs, another installation on the port and explicit engine selection.
 - [ ] Measure before/after timings and establish a practical automated latency
@@ -116,7 +123,7 @@ the proposed unified CLI, contextual chat and graphical interfaces.
   waiting for the response, receiving the response, preparing the speech engine
   if necessary, generating speech and playing audio. Report only stages actually
   observed by the backend; do not invent fine-grained provider/model progress.
-- [ ] During long silent waits, show periodic activity with elapsed time, including
+- [x] During long silent waits, show periodic activity with elapsed time, including
   first model/service startup and the gap between answer completion and audio.
 - [ ] Identify the selected local/cloud route, model and speech engine where
   useful, without printing credentials, private prompts or internal event data.
@@ -124,7 +131,7 @@ the proposed unified CLI, contextual chat and graphical interfaces.
   Otherwise describe the observable operation, such as waiting for the model.
 - [ ] Display the answer as soon as available; do not hide it until speech finishes.
   Preserve existing answer extraction and avoid leaking provider control text.
-- [ ] Keep activity separate from answer content and raw machine-readable logs.
+- [x] Keep activity separate from answer content and raw machine-readable logs.
   Do not contaminate piped/redirected answer output or speak activity messages.
 - [ ] Define terminal/noninteractive rendering deliberately. Use a transient
   indicator in an interactive terminal and explicit diagnostic output when
@@ -157,7 +164,7 @@ targets; their contribution to the observed delay has not been measured.
 - [ ] Compare the wrapper with direct OpenCode using the same simple prompt,
   effective model/configuration and permissions, with speech disabled first.
 - [ ] Compare cold and warm runs, then add speech and measure the extra cost.
-- [ ] Avoid expensive speech/helper initialization on text-only requests where
+- [x] Avoid expensive speech/helper initialization on text-only requests where
   feasible, while retaining required integrity and permission checks.
 - [ ] Assess safe earlier answer display/streaming independently of model speed.
 - [ ] Record measured results and fix avoidable overhead; distinguish provider
@@ -186,7 +193,7 @@ Suggested additional commit:
 Use a distinct `whas` namespace. Support readable flags and convenient shortcuts
 through the same implementation:
 
-| Proposed command | Behaviour |
+| Command | Behaviour |
 |---|---|
 | `whas ask` | Independent question using saved defaults |
 | `whas askl` | Equivalent to `whas ask --local` |
@@ -203,47 +210,47 @@ A one-shot invocation is independent of earlier invocations. A task may still
 involve multiple model/tool steps within that invocation. Conversation history,
 memory across conversations and background autonomy are separate capabilities.
 
-- [ ] Implement one parser/dispatcher for long forms and shortcuts.
+- [x] Implement one parser/dispatcher for long forms and shortcuts.
 - [ ] Preserve model overrides and existing speech/output options; document their
   mapping instead of silently dropping them during the naming change.
-- [ ] Define `ask` restrictions and `perform` tool permissions explicitly.
+- [x] Define `ask` restrictions and `perform` tool permissions explicitly.
   Preserve the existing restricted/task distinction; do not silently broaden it.
-- [ ] Keep `agent`, `localagent`, `agentdo` and `localagentdo` as compatibility
+- [x] Keep `agent`, `localagent`, `agentdo` and `localagentdo` as compatibility
   commands with their existing one-shot and provider-selection behaviour.
-- [ ] Expose useful help, configuration inspection and clear exit codes.
-- [ ] Reject contradictory local/cloud options and ambiguous shortcut overrides.
+- [x] Expose useful help, configuration inspection and clear exit codes.
+- [x] Reject contradictory local/cloud options and ambiguous shortcut overrides.
 - [ ] Never silently fall back from local to cloud or vice versa.
 
 ### Acceptance
 
-- [ ] Shortcuts and equivalent flags produce identical routing and permissions.
-- [ ] Existing command behaviour and argument quoting remain compatible.
+- [x] Shortcuts and equivalent flags produce identical routing and permissions.
+- [x] Existing command behaviour and argument quoting remain compatible.
 - [ ] Missing defaults, unavailable models and unsupported options give actionable
   errors before invoking a provider or executing tools.
 - [ ] Existing TTS command use remains functional during the transition.
 
 ## 3. Share configuration across every interface
 
-- [ ] Set initial defaults during installation. Allow them to change afterwards
+- [x] Set initial defaults during installation. Allow them to change afterwards
   through `whas configure`, using a human-readable interactive menu.
-- [ ] Define precedence as explicit command choice, then saved configuration,
+- [x] Define precedence as explicit command choice, then saved configuration,
   then documented built-in defaults.
-- [ ] Support default local/cloud preference, runtime, cloud/local models, TTS
+- [x] Support default local/cloud preference, runtime, cloud/local models, TTS
   engine, voice and speech-output preferences.
-- [ ] Decide whether `ask`, `perform` and `chat` share a runtime default or have
+- [x] Decide whether `ask`, `perform` and `chat` share a runtime default or have
   per-operation overrides; settle this before fixing the schema.
-- [ ] Reconcile the existing TTS default registry with configuration access so
+- [x] Reconcile the existing TTS default registry with configuration access so
   there is one authority per setting. Do not introduce competing GUI defaults.
-- [ ] Define scope for per-installation, per-user and optional project settings.
+- [x] Define scope for per-installation, per-user and optional project settings.
   Explain which setting is effective when more than one scope exists.
 - [ ] Validate settings and schema versions; migrate existing installations and
   retain unrelated user settings.
-- [ ] Use atomic writes and prevent concurrent CLI/GUI changes from losing data.
-- [ ] Changing settings must not silently install software. Explain missing
+- [x] Use atomic writes and prevent concurrent CLI/GUI changes from losing data.
+- [x] Changing settings must not silently install software. Explain missing
   components and offer a separate, explicit install operation.
-- [ ] Keep provider credentials in supported credential storage, separate from
+- [x] Keep provider credentials in supported credential storage, separate from
   ordinary shared configuration and distributable build assets.
-- [ ] An open GUI must refresh settings changed by the CLI, or clearly identify
+- [x] An open GUI must refresh settings changed by the CLI, or clearly identify
   changes that require restart. In-flight work must have defined behaviour.
 
 ### Configuration sections and voice management
@@ -252,21 +259,21 @@ Use separate GUI tabs with equivalent CLI configuration/menu access. Proposed
 sections are General, Agents, Models, Voice, and Sessions & Memory where supported.
 Final tab names can change without changing the shared configuration contract.
 
-- [ ] Provide a Voice tab for available/installed TTS strategies, explicit
+- [x] Provide a Voice tab for available/installed TTS strategies, explicit
   install/uninstall actions, default engine and supported device selection.
 - [ ] List and preview an engine's voices; choose its default voice and expose
   speech-output/playback preferences where supported.
-- [ ] Add/remove personal voice references only when the engine supports those
+- [x] Add/remove personal voice references only when the engine supports those
   operations. Show why an unavailable operation is unsupported rather than
   displaying controls that silently fail.
-- [ ] Validate reference requirements before import. F5 needs a WAV and matching
+- [x] Validate reference requirements before import. F5 needs a WAV and matching
   UTF-8 transcript; Chatterbox accepts supported WAV references; Piper's current
   strategy does not support reference-sample voice cloning.
-- [ ] Explain reference conditioning accurately; do not call adding a recording
+- [x] Explain reference conditioning accurately; do not call adding a recording
   model training when no weights are trained.
-- [ ] Confirm removal of personal reference files, preserve unrelated samples,
+- [x] Confirm removal of personal reference files, preserve unrelated samples,
   and reflect changes made through existing voice commands in the GUI.
-- [ ] Reuse strategy capability/validation declarations and management operations,
+- [x] Reuse strategy capability/validation declarations and management operations,
   rather than hard-coding engine-specific GUI behaviour wherever avoidable.
 
 ### Acceptance
@@ -284,19 +291,19 @@ Additional runtime integrations remain deferred pending agreement.
 
 ### Strategy contract
 
-- [ ] Extract OpenCode into the first strategy without changing current defaults.
-- [ ] Define a discoverable packaged strategy layout and validated manifest,
+- [x] Extract OpenCode into the first strategy without changing current defaults.
+- [x] Define a discoverable packaged strategy layout and validated manifest,
   following the useful lifecycle aspects of the TTS strategy design.
 - [ ] Specify pinned versions/sources, prerequisites, platform support and owned
   files. Treat strategy hooks as trusted executable code, not sandboxed data.
 - [ ] Define check, install, verify, configure, launch and uninstall operations.
 - [ ] Declare one-shot, interactive, session continuation, local-provider,
   structured-output, permission-control, memory and background capabilities.
-- [ ] Expose each runtime's native CLI where needed; do not force all its native
+- [x] Expose each runtime's native CLI where needed; do not force all its native
   features into a falsely equivalent common interface.
 - [ ] Validate unsupported operations and provider/runtime combinations before
   starting work. Existing authentication must not be assumed transferable.
-- [ ] Keep runtime selection independent of model provider and model selection.
+- [x] Keep runtime selection independent of model provider and model selection.
 - [ ] Allow multiple agent runtimes to be installed and run concurrently where
   supported. Do not copy TTS's single-active-service restriction blindly.
 - [ ] Own and stop only services/processes created for this installation. Keep
@@ -314,8 +321,8 @@ Ollama already supports multiple installed models. Our wrappers can override the
 configured model; setup currently establishes one default managed model. There
 is no need to invent a new model-switching system.
 
-- [ ] Let setup select multiple models and choose the local default separately.
-- [ ] Distinguish existing models, original downloaded models and stack-created
+- [x] Let setup select multiple models and choose the local default separately.
+- [x] Distinguish existing models, original downloaded models and stack-created
   configured aliases. Track ownership of each appropriately.
 - [ ] Show download sizes and hardware guidance when known, with clear uncertainty
   instead of assuming every model suits every machine.
@@ -323,17 +330,18 @@ is no need to invent a new model-switching system.
   explicit model overrides. Catalogue contents remain to be chosen.
 - [ ] Reuse or retain pre-existing models, handle failed/repeated downloads and
   ensure uninstallation removes only verified installer-owned models by default.
-- [ ] Preserve the explicit retain-models option and changed-model protections.
-- [ ] Offer installed TTS engines as independent selections with a saved default,
+- [x] Preserve the explicit retain-models option and changed-model protections.
+- [x] Offer installed TTS engines as independent selections with a saved default,
   using the engine-management implementation already present.
 
 ## 6. Build graphical setup and uninstallation
 
 Build this after CLI/configuration/strategy contracts are stable. Select the
 Windows UI toolkit and source-install build/distribution approach deliberately;
-neither is decided yet. Continue documenting unsigned executable behaviour.
+Decision: Windows Forms, compiled by source and bundled setup alike. Continue
+documenting unsigned executable behaviour.
 
-### Proposed application entry points
+### Application entry points
 
 - `whas-setup.exe`: graphical installation, maintenance and uninstallation.
 - `whas-gui.exe`: everyday use with Settings accessible from inside the app.
@@ -345,15 +353,15 @@ shortcuts can open setup, settings or uninstall screens directly.
 
 ### Shared backend requirements
 
-- [ ] Both source and EXE installation provide CLI and GUI capabilities. A source
+- [x] Both source and EXE installation provide CLI and GUI capabilities. A source
   installation must build or obtain the GUI assets through a defined process.
-- [ ] Use the same installation identity, configuration, ownership records,
+- [x] Use the same installation identity, configuration, ownership records,
   strategy hooks and cleanup rules for both interfaces.
 - [ ] Detect existing installations and offer maintenance instead of creating an
   accidental second copy. Handle explicitly requested custom roots deliberately.
-- [ ] Expose structured check results, phase/progress events, errors and receipts
+- [x] Expose structured check results, phase/progress events, errors and receipts
   for both terminal and GUI consumers. Do not parse coloured console text.
-- [ ] Keep CLI automation, noninteractive flags and exit codes working.
+- [x] Keep CLI automation, noninteractive flags and exit codes working.
 
 ### Installation screens
 
@@ -367,14 +375,14 @@ shortcuts can open setup, settings or uninstall screens directly.
 5. Installation: current operation, real progress/activity and useful errors.
 6. Completion: authentication/setup steps and ways to launch CLI or GUI use.
 
-- [ ] Define cancellation and failure recovery; cancellation must not be labelled
+- [x] Define cancellation and failure recovery; cancellation must not be labelled
   rollback if installed changes remain. Preserve recoverable ownership records.
 
 ### Uninstallation screens
 
-- [ ] Preview files, commands, models and services affected, plus preserved data.
-- [ ] Offer retain-managed-models and clearly distinguish personal data deletion.
-- [ ] Require confirmation before applying, with visible progress and final receipt.
+- [x] Preview files, commands, models and services affected, plus preserved data.
+- [x] Offer retain-managed-models and clearly distinguish personal data deletion.
+- [x] Require confirmation before applying, with visible progress and final receipt.
 - [ ] Test EXE install -> GUI uninstall, source install -> GUI uninstall,
   EXE install -> source uninstall and source install -> source uninstall.
 - [ ] Verify service shutdown, command/PATH cleanup, changed-file preservation
@@ -386,7 +394,7 @@ shortcuts can open setup, settings or uninstall screens directly.
 - [ ] Show effective runtime, provider and model with local/cloud selection.
 - [ ] Provide session creation/resumption and clearly expose memory behaviour.
 - [ ] Include TTS engine/voice selection and speech controls.
-- [ ] Open shared Settings from the usage app; never create a separate GUI config.
+- [x] Open shared Settings from the usage app; never create a separate GUI config.
 - [ ] Present tool permission requests and failures faithfully. The GUI must not
   bypass permissions or claim a task completed when the backend failed.
 - [ ] Provide a complete first-use path without requiring a terminal, including

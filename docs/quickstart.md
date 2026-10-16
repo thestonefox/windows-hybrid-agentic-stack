@@ -126,6 +126,8 @@ The default local model is `qwen3:8b`; setup offers to download it if missing.
 For speech, choose one or more engines; the first is the default. Chatterbox is
 the initial default. F5 pretrained weights are for noncommercial use only.
 The default destination is `%USERPROFILE%\AI\WindowsHybridAgenticStack`.
+Both installation routes provide the command line and graphical applications.
+For multiple local models, see [model selection](cli.md#local-model-selection).
 
 ### Standalone EXE route
 
@@ -135,7 +137,10 @@ Copy `dist\whas-setup.exe` to the destination PC; no source checkout is needed
 there. Keep the EXE outside the installation directory.
 
 The EXE is **unsigned**; read [Windows warnings and verification](installation.md#unsigned-exe-and-windows-warnings).
-From its containing folder, check prerequisites as above, then install:
+From its containing folder, check prerequisites as above, then choose a setup route.
+
+Double-click `whas-setup.exe` to use the graphical component, model, engine and
+prerequisite screens. See the [graphical guide](gui.md). For console setup:
 
 ```powershell
 .\whas-setup.exe --install
@@ -151,11 +156,11 @@ Run the [PATH refresh command](#refresh-path) again or reopen the terminal
 application. Use the examples for components you installed:
 
 ```powershell
-agent "Explain the difference between RAM and storage"
+whas askc "Explain the difference between RAM and storage"
 ```
 
 ```powershell
-localagent "What is 2 plus 2?"
+whas askl "What is 2 plus 2?"
 ```
 
 ```powershell
@@ -163,11 +168,15 @@ tts-say "Hello, the speech service is working."
 ```
 
 ```powershell
-agent -v "Explain gravity in one sentence"
+whas askc --voice "Explain gravity in one sentence"
 ```
 
 The first speech request loads a model. See [engine management](tts-strategies.md#manage-installed-engines)
 and the [per-engine guides](tts-strategies.md#user-guides) for selection and custom voices.
+Use `whas configure` to change defaults. For contextual conversations use
+`whas chatl` or `whas chatc`; [session guidance](agent-strategies.md#sessions-and-memory)
+explains resumption and personal data. To use the GUI, open `whas-gui.exe` in
+your installation folder. Its Maintenance tab opens graphical uninstallation.
 
 ## Uninstall
 
