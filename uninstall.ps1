@@ -4,20 +4,22 @@
     Preview or uninstall files recorded by the stack installer.
 .DESCRIPTION
     Preview is the default. -Apply requests confirmation before removal.
-    Custom voices, added/edited files, existing tools and models are retained.
-    -RemoveManagedModels includes only installer-created, unchanged models.
+    Custom voices, added/edited files, existing tools and original models remain.
+    Unchanged installer-created models are removed unless retained explicitly.
 .EXAMPLE
     .\uninstall.ps1
 .EXAMPLE
     .\uninstall.ps1 -Apply
 .EXAMPLE
-    .\uninstall.ps1 -Apply -RemoveManagedModels
+    .\uninstall.ps1 -Apply -RetainManagedModels
 #>
 [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='High')]
-param([string]$InstallPath, [switch]$Apply, [switch]$RemoveManagedModels,
+param([string]$InstallPath, [switch]$Apply, [switch]$RetainManagedModels,
+    [switch]$RemoveManagedModels,
     [bool]$PersistCommandPath = $true)
 $ErrorActionPreference = 'Stop'
 try {
+    if ($RetainManagedModels -and $RemoveManagedModels) { throw 'Choose either -RetainManagedModels or -RemoveManagedModels, not both.' }
     if (-not ($null -ne ('WindowsHybridAgenticStack.SetupRuntime' -as [type]) -and [WindowsHybridAgenticStack.SetupRuntime]::IsHosting)) {
         . (Join-Path $PSScriptRoot 'scripts\script-invocation.ps1')
     }
@@ -32,7 +34,7 @@ try {
         elseif (Test-Path -LiteralPath $registration) { $InstallPath = (Get-Content -LiteralPath $registration -Raw -Encoding UTF8 | ConvertFrom-Json).InstallPath }
         else { $InstallPath = Join-Path $HOME 'AI\WindowsHybridAgenticStack' }
     }
-    $plan = Get-StackUninstallPlan -InstallPath $InstallPath -RemoveManagedModels:$RemoveManagedModels -ShowProgress
+    $plan = Get-StackUninstallPlan -InstallPath $InstallPath -RemoveManagedModels:(-not $RetainManagedModels) -ShowProgress
     Write-Host "Installation: $($plan.Root)"
     Write-Host "Remove tracked files: $($plan.DeleteFiles.Count); restore original files: $($plan.RestoreFiles.Count)"
     Write-Host "Preserve files: $($plan.KeepFiles.Count); unregister local commands: $($plan.UnregisterCommands)"

@@ -135,6 +135,8 @@ exit 0
     $null = Invoke-RestrictedSetup @('--install-path') -ExpectedExit 1
     $null = Invoke-RestrictedSetup @('--plan','--check') -ExpectedExit 1
     $null = Invoke-RestrictedSetup @('--install','--remove-managed-models') -ExpectedExit 1
+    $null = Invoke-RestrictedSetup @('--install','--retain-managed-models') -ExpectedExit 1
+    $null = Invoke-RestrictedSetup @('--uninstall','--retain-managed-models','--remove-managed-models') -ExpectedExit 1
     Write-Host 'PASS: JSON override validation, missing values, incompatible actions and invalid model-removal action rejected'
     $output = Invoke-RestrictedSetup @('--check','--local')
     Assert-True ($output.Contains('CHECK Cloud=False Local=True Voice=False POLICY=Restricted') -and $output.Contains('CHECK PIPELINE OUTPUT')) 'Embedded checker sees Restricted and forwards selection/output'

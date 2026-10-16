@@ -19,7 +19,8 @@ namespace WindowsHybridAgenticStack {
             Console.WriteLine("  --install              Install selected cloud, local and voice components");
             Console.WriteLine("  --uninstall            Preview removal of a tracked installation");
             Console.WriteLine("  --apply                Apply uninstall, with confirmation");
-            Console.WriteLine("  --remove-managed-models Include unchanged installer-created models in uninstall");
+            Console.WriteLine("  --retain-managed-models Keep installer-created models (otherwise removed if unchanged)");
+            Console.WriteLine("  --remove-managed-models Legacy explicit removal flag; removal is now the default");
             Console.WriteLine("  --yes                  Accept installation/uninstall confirmation");
             Console.WriteLine("  --no-path              Leave the saved user PATH unchanged");
         }
@@ -56,7 +57,7 @@ namespace WindowsHybridAgenticStack {
         private static int Run(string[] args) {
             string mode = null, config = null, path = null, ttsEngine = null;
             bool cloud = false, local = false, voice = false;
-            bool yes = false, apply = false, noPath = false, removeModels = false;
+            bool yes = false, apply = false, noPath = false, removeModels = false, retainModels = false;
             foreach (string value in args) if (value == null) throw new ArgumentException("Invalid argument.");
             for (int i = 0; i < args.Length; i++) {
                 string option = args[i].ToLowerInvariant();
@@ -74,6 +75,7 @@ namespace WindowsHybridAgenticStack {
                 else if (option == "--apply") apply = true;
                 else if (option == "--no-path") noPath = true;
                 else if (option == "--remove-managed-models") removeModels = true;
+                else if (option == "--retain-managed-models") retainModels = true;
                 else if (option == "--config") {
                     if (config != null) throw new ArgumentException("Duplicate --config option.");
                     config = Next(args, ref i);
@@ -86,12 +88,14 @@ namespace WindowsHybridAgenticStack {
             if (mode == null) throw new ArgumentException("Specify a setup action; use --help for usage.");
             if (apply && mode != "--uninstall") throw new ArgumentException("--apply requires --uninstall.");
             if (removeModels && mode != "--uninstall") throw new ArgumentException("--remove-managed-models requires --uninstall.");
+            if (retainModels && mode != "--uninstall") throw new ArgumentException("--retain-managed-models requires --uninstall.");
+            if (retainModels && removeModels) throw new ArgumentException("Choose either --retain-managed-models or --remove-managed-models, not both.");
             if (yes && mode != "--install" && !(mode == "--uninstall" && apply)) throw new ArgumentException("--yes requires installation or applied uninstall.");
             if (noPath && mode != "--install" && mode != "--uninstall") throw new ArgumentException("--no-path requires install or uninstall.");
             if (ttsEngine != null && !voice) throw new ArgumentException("--tts-engine requires --voice.");
             if (mode == "--uninstall") {
                 if (cloud || local || voice || config != null || ttsEngine != null) throw new ArgumentException("Uninstall does not accept component or configuration flags.");
-                Hashtable arguments = new Hashtable { { "Apply", apply }, { "PersistCommandPath", !noPath }, { "RemoveManagedModels", removeModels } };
+                Hashtable arguments = new Hashtable { { "Apply", apply }, { "PersistCommandPath", !noPath }, { "RetainManagedModels", retainModels }, { "RemoveManagedModels", removeModels } };
                 if (path != null) arguments.Add("InstallPath", path);
                 if (yes) arguments.Add("Confirm", false);
                 return SetupRuntime.Run("uninstall.ps1", arguments, null);
