@@ -24,10 +24,10 @@ function Get-TtsDefaultEngine {
 }
 
 function Get-TtsInstalledRuntime {
-    param([string]$Engine)
+    param([string]$Engine, $State)
     if (-not $Engine) { throw 'No default engine is configured. Use tts-engine-default ENGINE.' }
     $package = Get-TtsStrategy -Root $script:TtsRoot -Id $Engine
-    $state = Get-TtsEngineState
+    $state = if ($State) { $State } else { Get-TtsEngineState }
     $record = @($state.TtsStrategies | Where-Object { $_.Id -ceq $Engine -and $_.Status -eq 'Installed' })
     if ($record.Count -ne 1) { throw "Engine '$Engine' is available but not installed. Use tts-engine-install $Engine." }
     $runtimePath = Resolve-TtsPackagePath $script:TtsRoot "tts/engines/$Engine/runtime.json"
@@ -262,12 +262,15 @@ function tts-stop { param([string]$Engine) Invoke-TtsEngineCommand $Engine 'Invo
 function tts-status {
     param([string]$Engine)
     Write-Host "Default engine: $(Get-TtsDefaultEngine)"
-    $active = Get-TtsActiveEngine
+    $status = Get-TtsStatusResponse -AnyEngine
+    $active = if ($status) { $status.engine } else { $null }
     Write-Host "Active engine:  $active"
-    if ($Engine) { $null = Get-TtsInstalledRuntime $Engine }
+    $state = $null
+    if ($Engine -or $active) { $state = Read-StackInstallationState $script:TtsRoot -ReadOnly }
+    if ($Engine) { $null = Get-TtsInstalledRuntime $Engine -State $state }
     if ($Engine -and $Engine -cne $active) { Write-Host "Requested engine: $Engine (stopped)"; return }
-    if ($active) { Set-TtsRuntimeSelection (Get-TtsInstalledRuntime $active) }
-    Invoke-TtsStatusCore
+    if ($active) { Set-TtsRuntimeSelection (Get-TtsInstalledRuntime $active -State $state) }
+    Invoke-TtsStatusCore -Status $status -AlreadyChecked
 }
 function tts-say { param([Parameter(Position=0,Mandatory=$true)][string]$Text,[string]$Voice=$script:TtsDefaultVoice,[string]$Engine) Invoke-TtsEngineCommand $Engine 'Invoke-TtsSayCore' @{Text=$Text;Voice=$Voice} }
 function tts-voice-list { param([string]$Engine) Invoke-TtsEngineCommand $Engine 'Invoke-TtsVoiceListCore' }

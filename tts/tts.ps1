@@ -188,7 +188,8 @@ function Get-TtsServiceProcess {
 }
 
 function Invoke-TtsStatusCore {
-    $status = Get-TtsStatusResponse
+    param($Status, [switch]$AlreadyChecked)
+    if (-not $AlreadyChecked) { $Status = Get-TtsStatusResponse }
 
     if ($null -ne $status) {
         $voice = if ($status.loaded_voice) {
@@ -464,7 +465,12 @@ function Invoke-TtsSayCore {
         [string]$Voice = $script:TtsDefaultVoice
     )
 
-    if (-not (Wait-TtsReady)) {
+    $activity = $null
+    $canReport = $null -ne ('WindowsHybridAgenticStack.OperationActivity' -as [type])
+    if ($canReport) { $activity = [WindowsHybridAgenticStack.OperationActivity]::Begin('Preparing speech engine') }
+    try { $ready = Wait-TtsReady }
+    finally { if ($activity) { $activity.Dispose(); $activity = $null } }
+    if (-not $ready) {
         Write-Error 'The selected speech engine is not ready.'
         return
     }
@@ -477,6 +483,7 @@ function Invoke-TtsSayCore {
     } | ConvertTo-Json -Compress
 
     try {
+        if ($canReport) { $activity = [WindowsHybridAgenticStack.OperationActivity]::Begin('Generating speech') }
         Invoke-WebRequest `
             -Uri "$script:TtsBaseUrl/speak" `
             -Method Post `
@@ -487,6 +494,8 @@ function Invoke-TtsSayCore {
             -UseBasicParsing `
             -ErrorAction Stop | Out-Null
 
+        if ($activity) { $activity.Dispose(); $activity = $null }
+        if ($canReport) { $activity = [WindowsHybridAgenticStack.OperationActivity]::Begin('Playing audio') }
         $duration = Get-TtsWavDurationSeconds -Path $outputFile
         $player = New-Object System.Media.SoundPlayer($outputFile)
 
@@ -508,6 +517,7 @@ function Invoke-TtsSayCore {
     catch {
         Write-Error "Speech failed: $($_.Exception.Message)"
     }
+    finally { if ($activity) { $activity.Dispose() } }
 }
 
 function Invoke-TtsVoiceListCore {

@@ -180,10 +180,15 @@ function Write-StackInstallationState {
 }
 
 function Read-StackInstallationState {
-    param([string]$Root)
+    param([string]$Root, [switch]$ReadOnly)
     $path = Join-Path $Root '.whas-installation.json'
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
-    $state = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+    $json = [IO.File]::ReadAllText($path)
+    # Reuse validated snapshots only for readers. Mutating callers always get
+    # their own object, and changed bytes invalidate the read-only snapshot.
+    if ($ReadOnly -and $script:StackReadSnapshot -and $script:StackReadSnapshot.Root -ceq $Root -and
+        $script:StackReadSnapshot.Json -ceq $json) { return $script:StackReadSnapshot.State }
+    $state = $json | ConvertFrom-Json
     if ($state.SchemaVersion -notin @(1,2) -or $state.InstallPath -ine $Root -or
         $state.OwnerSid -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or
         $state.InstallationId -notmatch '^[a-f0-9]{32}$') { throw 'Invalid or foreign installation ownership record.' }
@@ -204,6 +209,7 @@ function Read-StackInstallationState {
     foreach ($entry in @($state.Files) + @($state.OriginalFiles)) {
         $null = Resolve-StackOwnedPath -Root $Root -Relative $entry.Path
     }
+    if ($ReadOnly) { $script:StackReadSnapshot = [pscustomobject]@{Root=$Root;Json=$json;State=$state} }
     return $state
 }
 
@@ -239,7 +245,9 @@ function Start-StackInstallationTracking {
     $registration = Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack'
     if ($registration -ieq $root -or $registration.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase) -or
         $root.StartsWith($registration + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Installation and command registration must be separate directories.' }
-    $tree = Get-StackInstallationTree -Root $root
+    $scan = New-StackOperationProgress 'Inspecting existing installation' -Enabled
+    $tree = Get-StackInstallationTree -Root $root -Progress $scan
+    Write-StackOperationProgress $scan -Completed $tree.Files.Count -Total $tree.Files.Count -Force
     $state = Read-StackInstallationState -Root $root
     # A completed uninstall ends the previous ownership session. Retained user
     # files become the baseline for a new install, including a different engine.
@@ -332,17 +340,29 @@ function Complete-StackInstallationTracking {
         $state | Add-Member -NotePropertyName TtsStrategies -NotePropertyValue @($latest.TtsStrategies) -Force
     }
     $root = Assert-StackInstallationRoot -Root $Session.Root
-    $tree = Get-StackInstallationTree -Root $root
-    $originals = @($state.OriginalFiles.Path)
+    Write-Host 'Finalising installation: recording files for safe uninstallation...'
+    $scan = New-StackOperationProgress 'Scanning installed files' -Enabled
+    $tree = Get-StackInstallationTree -Root $root -Progress $scan
+    Write-StackOperationProgress $scan -Completed $tree.Files.Count -Total $tree.Files.Count -Force
+    $originals = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($state.OriginalFiles)) { $null = $originals.Add($item.Path) }
+    $preexisting = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($item in @($state.PreexistingPaths)) { $null = $preexisting.Add($item) }
+    $progress = New-StackOperationProgress 'Recording installed file hashes' -Enabled
+    $progress.Total = $tree.Files.Count
+    $inspected = 0
     $files = New-Object 'System.Collections.Generic.List[object]'
     foreach ($relative in $tree.Files) {
+        $progress.Completed = ++$inspected
+        if ($progress.Timer.ElapsedMilliseconds - $progress.LastUpdate -ge 2000) { Write-StackOperationProgress $progress }
         if ($relative -eq '.whas-installation.json' -or $relative -like 'voices/*' -or
             ($state.PreexistingVenv -and $relative -like '.venv/*')) { continue }
-        if ($relative -in $originals -or @($state.PreexistingPaths) -notcontains $relative) {
-            $files.Add([pscustomobject]@{ Path = $relative; SHA256 = Get-StackFileSHA256 ([IO.Path]::Combine($root, $relative)) -AllowConcurrentWrite:(Test-StackGeneratedFile $relative $state) })
+        if ($originals.Contains($relative) -or -not $preexisting.Contains($relative)) {
+            $files.Add([pscustomobject]@{ Path = $relative; SHA256 = Get-StackFileSHA256 ([IO.Path]::Combine($root, $relative)) -AllowConcurrentWrite:(Test-StackGeneratedFile $relative $state) -Progress $progress })
         }
     }
     $state.Files = $files.ToArray()
+    Write-StackOperationProgress $progress -Completed $inspected -Total $tree.Files.Count -Force
     $state.Directories = @($tree.Directories | Where-Object { @($state.PreexistingDirectories) -notcontains $_ })
     if ($Session.ModelName) {
         try {
@@ -366,5 +386,6 @@ function Complete-StackInstallationTracking {
     }
     $state.RegistrationBackups = @($backups.Values)
     $state.Status = if ($Succeeded) { 'Installed' } else { 'Interrupted' }
+    Write-Host 'Saving installation ownership record...'
     Write-StackInstallationState -Root $root -State $state
 }

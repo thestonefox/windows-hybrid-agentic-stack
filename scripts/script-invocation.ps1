@@ -19,10 +19,17 @@ function Get-StackSetupScript {
             if ((Get-Item -LiteralPath $ancestor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Application scripts must not use reparse points.' }
             $ancestor = Split-Path -Parent $ancestor
         }
-        $state = Read-StackInstallationState $root
-        $assets = @($state.Files) + @($state.TtsStrategies | ForEach-Object { $_.PackageFiles })
+        $state = Read-StackInstallationState $root -ReadOnly
+        if (-not $script:StackOwnedAssetIndex -or -not [object]::ReferenceEquals($script:StackOwnedAssetIndex.State,$state)) {
+            $index = @{}
+            foreach ($asset in @($state.Files) + @($state.TtsStrategies | ForEach-Object { $_.PackageFiles })) {
+                if (-not $index.ContainsKey($asset.Path)) { $index[$asset.Path] = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal) }
+                $null = $index[$asset.Path].Add([string]$asset.SHA256)
+            }
+            $script:StackOwnedAssetIndex = [pscustomobject]@{State=$state;Hashes=$index}
+        }
         $hash = Get-StackFileSHA256 $full
-        if (-not @($assets | Where-Object { $_.Path -ceq $relative -and $_.SHA256 -ceq $hash }).Count) { throw "Application script is unowned or changed: $relative" }
+        if (-not $script:StackOwnedAssetIndex.Hashes.ContainsKey($relative) -or -not $script:StackOwnedAssetIndex.Hashes[$relative].Contains($hash)) { throw "Application script is unowned or changed: $relative" }
         $tokens = $null; $parseErrors = $null
         $ast = [Management.Automation.Language.Parser]::ParseInput([IO.File]::ReadAllText($full), $full, [ref]$tokens, [ref]$parseErrors)
         if ($parseErrors.Count) { throw 'Invalid installed application script.' }

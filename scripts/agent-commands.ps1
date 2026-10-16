@@ -315,8 +315,12 @@ function Invoke-AgentStackTask {
     # native application output using the console code page.
     $previousConsoleEncoding = [Console]::OutputEncoding
     $previousOutputEncoding = $OutputEncoding
+    $activity = $null
 
     try {
+        if ($null -ne ('WindowsHybridAgenticStack.OperationActivity' -as [type])) {
+            $activity = [WindowsHybridAgenticStack.OperationActivity]::Begin('Waiting for model response')
+        }
         $env:OPENCODE_CONFIG = $openCodeConfig
 
         $utf8 = New-Object System.Text.UTF8Encoding($false)
@@ -383,6 +387,7 @@ function Invoke-AgentStackTask {
             }
 
         $exitCode = $LASTEXITCODE
+        if ($activity) { $activity.Dispose(); $activity = $null }
 
         if ($lastText -and -not $verboseOutput) {
             Write-Output $lastText
@@ -425,6 +430,7 @@ function Invoke-AgentStackTask {
         }
     }
     finally {
+        if ($activity) { $activity.Dispose() }
         $env:OPENCODE_CONFIG = $previousConfig
         [Console]::OutputEncoding = $previousConsoleEncoding
         $OutputEncoding = $previousOutputEncoding

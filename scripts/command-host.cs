@@ -15,6 +15,32 @@ using System.Runtime.InteropServices;
 using System.Collections;
 
 namespace WindowsHybridAgenticStack {
+    // Activity goes to stderr, never into answers, raw model events or speech.
+    public sealed class OperationActivity : IDisposable {
+        private readonly string phase;
+        private readonly Stopwatch clock = Stopwatch.StartNew();
+        private readonly System.Threading.Timer timer;
+        private bool disposed;
+        private readonly object gate = new object();
+        private OperationActivity(string value) {
+            phase = value;
+            Publish(false);
+            timer = new System.Threading.Timer(delegate { lock (gate) { if (!disposed) Publish(false); } }, null, 2000, 2000);
+        }
+        public static OperationActivity Begin(string phase) {
+            if (Console.IsOutputRedirected && Environment.GetEnvironmentVariable("WHAS_PROGRESS_EVENTS") != "1") return null;
+            return new OperationActivity(phase);
+        }
+        private void Publish(bool complete) {
+            try {
+                if (Environment.GetEnvironmentVariable("WHAS_PROGRESS_EVENTS") == "1")
+                    Console.Error.WriteLine("WHAS_EVENT {\"type\":\"activity\",\"phase\":\"" + phase.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\",\"elapsedSeconds\":" + clock.Elapsed.TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) + ",\"complete\":" + (complete ? "true" : "false") + "}");
+                else if (!complete) Console.Error.WriteLine("[" + phase + "; " + (int)clock.Elapsed.TotalSeconds + "s elapsed]");
+            } catch (IOException) { }
+        }
+        public void Dispose() { lock (gate) { if (disposed) return; disposed = true; timer.Dispose(); Publish(true); } }
+    }
+
     public sealed class ConsoleUI : PSHostUserInterface {
         public override PSHostRawUserInterface RawUI { get { return null; } }
         public override string ReadLine() { return Console.ReadLine(); }
@@ -212,7 +238,8 @@ namespace WindowsHybridAgenticStack {
                         Load(ps, Path.Combine(root, "scripts", "script-invocation.ps1"), null);
                     string strategies = Path.Combine(root, "tts", "strategy-management.ps1");
                     if (File.Exists(strategies)) Load(ps, strategies, null);
-                    if (!isAgent || File.Exists(tts)) Load(ps, tts, root);
+                    bool wantsSpeech = Array.Exists(args, delegate(string arg) { return arg == "-v" || arg == "--voice"; });
+                    if (!isAgent || (wantsSpeech && File.Exists(tts))) Load(ps, tts, root);
                     ps.Commands.Clear();
                     ps.Streams.Error.Clear();
                     if (isAgent) {
