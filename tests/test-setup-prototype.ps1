@@ -64,7 +64,7 @@ try {
     # Build a disposable source fixture with a deterministic prerequisite checker.
     $source = Join-Path $fixture 'source'
     foreach ($relative in @('install.ps1','uninstall.ps1','scripts\command-host.cs','scripts\setup-host.cs','scripts\setup-runtime.cs','scripts\build-setup.ps1',
-        'scripts\setup-preview.ps1','scripts\configuration.ps1','config\defaults.json','config\AGENTS.md','scripts\script-invocation.ps1',
+        'scripts\setup-preview.ps1','scripts\configuration.ps1','scripts\gui-host.cs','scripts\build-gui.ps1','scripts\build-setup.ps1','scripts\setup-host.cs','scripts\setup-runtime.cs','scripts\agent-strategies.ps1','scripts\whas.ps1','agents\strategies\opencode\manifest.json','agents\strategies\opencode\adapter.ps1','config\defaults.json','config\AGENTS.md','scripts\script-invocation.ps1',
         'scripts\setup-agents.ps1','scripts\install-agent-commands.ps1','scripts\command-registration.ps1','scripts\profile-loader.ps1',
         'scripts\config.ps1','scripts\agent-commands.ps1','scripts\installation-state.ps1','scripts\uninstall.ps1',
         'tts\install-tts.ps1','tts\tts.ps1','tts\tts_service.py', 'tts\strategy-management.ps1', 'tts\engine-management.ps1', 'tts\strategy.schema.json', 'tts\strategies\chatterbox-turbo\manifest.json', 'tts\strategies\chatterbox-turbo\install.ps1', 'tts\strategies\chatterbox-turbo\uninstall.ps1', 'tts\strategies\chatterbox-turbo\backend.py', 'tts\strategies\chatterbox-turbo\requirements.txt', 'tts\strategies\chatterbox-turbo\prepare_model.py')) {
@@ -107,8 +107,9 @@ exit 0
     Assert-True $rejected 'Build refuses to replace existing output without Force'
     $output = Invoke-RestrictedSetup @('--help')
     Assert-True ($output.Contains('Install selected cloud, local and voice components')) 'Standalone help identifies installation scope'
-    $output = Invoke-RestrictedSetup @()
-    Assert-True ($output.Contains('Usage:')) 'No arguments show help'
+    $render = Join-Path $fixture 'setup-render.png'
+    $output = Invoke-RestrictedSetup @('--gui-render',$render)
+    Assert-True ((Test-Path -LiteralPath $render) -and (Get-Item -LiteralPath $render).Length -gt 1000) 'Graphical setup renders under Restricted'
     # Poison loose scripts/defaults next to the EXE: only compiled assets may run.
     [IO.Directory]::CreateDirectory((Join-Path $portable 'scripts')) | Out-Null
     [IO.Directory]::CreateDirectory((Join-Path $portable 'config')) | Out-Null
@@ -172,7 +173,7 @@ exit 0
     $null = Invoke-RestrictedSetup @('--install','--cloud','--install-path',$protected,'--no-path','--yes') -ExpectedExit 1
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $protected '.whas-installation.json'))) 'Native installer refuses a Git checkout before tracking writes'
     Write-Host 'PASS: Interrupted native install cleanup and Git checkout protection'
-    foreach ($components in @(@('--local'),@('--voice'),@('--cloud','--local','--voice'))) {
+    foreach ($components in @(@('--core'),@('--local'),@('--voice'),@('--cloud','--local','--voice'))) {
         $componentTarget = Join-Path $fixture ('components-' + [guid]::NewGuid().ToString('N'))
         $output = Invoke-RestrictedSetup (@('--install','--install-path',$componentTarget,'--no-path','--yes') + $components)
         $expectedSelection = 'CHECK Cloud=' + [string]($components -contains '--cloud') + ' Local=' + [string]($components -contains '--local') + ' Voice=' + [string]($components -contains '--voice') + ' POLICY=Restricted'

@@ -7,12 +7,13 @@
     credentials, profiles or environment values are embedded in the executable.
 #>
 [CmdletBinding()]
-param([string]$OutputPath, [switch]$Force)
+param([string]$OutputPath, [switch]$Force, [switch]$Fingerprint)
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -ne 5 -or -not [Environment]::Is64BitProcess) {
     throw 'Build using 64-bit Windows PowerShell 5.1.'
 }
 $repo = Split-Path -Parent $PSScriptRoot
+if (-not (Get-Command Get-StackSetupScript -ErrorAction Ignore)) { . (Join-Path $PSScriptRoot 'script-invocation.ps1') }
 if (-not $OutputPath) { $OutputPath = Join-Path $repo 'dist\whas-setup.exe' }
 $OutputPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
 if ([IO.Path]::GetExtension($OutputPath) -ine '.exe') { throw 'OutputPath must name an .exe file.' }
@@ -24,7 +25,7 @@ $properties = [ordered]@{
     Defaults = 'config\defaults.json'
     StrategyHelper = 'tts\strategy-management.ps1'
 }
-. (Join-Path $repo 'tts/strategy-management.ps1')
+. (Get-StackSetupScript (Join-Path $repo 'tts/strategy-management.ps1'))
 $packages = @(Get-TtsStrategies -Root $repo)
 $catalog = ConvertTo-Json -InputObject @($packages | ForEach-Object { $_.Manifest }) -Depth 12 -Compress
 $payload = New-Object Text.StringBuilder
@@ -33,11 +34,24 @@ $null = $payload.AppendLine('internal static readonly Dictionary<string,string> 
 $assets = @($properties.Values) + @('install.ps1','uninstall.ps1','config\AGENTS.md',
     'scripts\script-invocation.ps1','scripts\setup-agents.ps1','scripts\install-agent-commands.ps1',
     'scripts\command-host.cs','scripts\command-registration.ps1','scripts\profile-loader.ps1',
-    'scripts\config.ps1','scripts\agent-commands.ps1','scripts\installation-state.ps1','scripts\uninstall.ps1',
+    'scripts\config.ps1','scripts\agent-commands.ps1','scripts\agent-strategies.ps1','scripts\whas.ps1','scripts\installation-state.ps1','scripts\uninstall.ps1',
     'tts\install-tts.ps1','tts\engine-management.ps1','tts\tts.ps1','tts\tts_service.py')
 $assets += 'tts/strategy.schema.json'
+$assets += @('scripts/gui-host.cs','scripts/build-gui.ps1','scripts/build-setup.ps1','scripts/setup-host.cs','scripts/setup-runtime.cs')
+. (Get-StackSetupScript (Join-Path $repo 'scripts/agent-strategies.ps1')) -InstallPath $repo
+. (Get-StackSetupScript (Join-Path $repo 'scripts/installation-state.ps1'))
+foreach ($strategy in Get-WhasAgentStrategies) {
+    foreach ($file in $strategy.Manifest.files) { $assets += "agents/strategies/$($strategy.Manifest.id)/$file" }
+}
 foreach ($package in $packages) {
     foreach ($file in $package.Files) { $assets += "tts/strategies/$($package.Manifest.id)/$file" }
+}
+if ($Fingerprint) {
+    $inputLines = @($assets | Select-Object -Unique | Sort-Object | ForEach-Object { $_.Replace('\','/') + ':' + (Get-FileHash -LiteralPath (Join-Path $repo $_) -Algorithm SHA256).Hash })
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try { ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($inputLines -join "`n"))))).Replace('-','') }
+    finally { $sha.Dispose() }
+    return
 }
 foreach ($relative in $assets | Select-Object -Unique) {
     $encoded = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $repo $relative)))
@@ -64,10 +78,11 @@ try {
     $parameters.TempFiles = New-Object CodeDom.Compiler.TempFileCollection($build, $false)
     $null = $parameters.ReferencedAssemblies.Add('System.dll')
     $null = $parameters.ReferencedAssemblies.Add('System.Core.dll')
+    foreach ($assembly in @('System.Drawing.dll','System.Windows.Forms.dll','System.Web.Extensions.dll')) { $null = $parameters.ReferencedAssemblies.Add($assembly) }
     $null = $parameters.ReferencedAssemblies.Add([Management.Automation.PSObject].Assembly.Location)
     $compiler = New-Object Microsoft.CSharp.CSharpCodeProvider
     $result = $compiler.CompileAssemblyFromFile($parameters, [string[]]@(
-        (Join-Path $PSScriptRoot 'command-host.cs'), (Join-Path $PSScriptRoot 'setup-host.cs'), (Join-Path $PSScriptRoot 'setup-runtime.cs'), $generated))
+        (Join-Path $PSScriptRoot 'command-host.cs'), (Join-Path $PSScriptRoot 'gui-host.cs'), (Join-Path $PSScriptRoot 'setup-host.cs'), (Join-Path $PSScriptRoot 'setup-runtime.cs'), $generated))
     if ($result.Errors.HasErrors) { throw (($result.Errors | ForEach-Object ToString) -join [Environment]::NewLine) }
     [IO.Directory]::CreateDirectory((Split-Path -Parent $OutputPath)) | Out-Null
     Move-Item -LiteralPath $compiled -Destination $OutputPath -Force:$Force

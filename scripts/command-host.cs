@@ -31,6 +31,11 @@ namespace WindowsHybridAgenticStack {
             if (Console.IsOutputRedirected && Environment.GetEnvironmentVariable("WHAS_PROGRESS_EVENTS") != "1") return null;
             return new OperationActivity(phase);
         }
+        private static string Escape(string value) { return value.Replace("\\","\\\\").Replace("\"","\\\"").Replace("\r","\\r").Replace("\n","\\n").Replace("\t","\\t"); }
+        public static void Check(string component,string status,string details,bool required) {
+            if(Environment.GetEnvironmentVariable("WHAS_PROGRESS_EVENTS")!="1") return;
+            Console.Error.WriteLine("WHAS_EVENT {\"type\":\"check\",\"component\":\""+Escape(component)+"\",\"status\":\""+Escape(status)+"\",\"details\":\""+Escape(details)+"\",\"required\":"+(required?"true":"false")+"}");
+        }
         private void Publish(bool complete) {
             try {
                 if (Environment.GetEnvironmentVariable("WHAS_PROGRESS_EVENTS") == "1")
@@ -118,6 +123,48 @@ namespace WindowsHybridAgenticStack {
 
     public static class CommandHost {
         public static string ManagedRoot { get; private set; }
+        public static int RunInteractive(string executable,string[] arguments) {
+            var quoted=new List<string>();
+            foreach(string arg in arguments) {
+                var text=new System.Text.StringBuilder("\""); int slashes=0;
+                foreach(char c in arg) { if(c=='\\') { slashes++; continue; } if(c=='\"') text.Append('\\',slashes*2+1).Append(c); else text.Append('\\',slashes).Append(c); slashes=0; }
+                quoted.Add(text.Append('\\',slashes*2).Append('\"').ToString());
+            }
+            var start=new ProcessStartInfo(executable,String.Join(" ",quoted)); start.UseShellExecute=false;
+            using(var process=Process.Start(start)) { process.WaitForExit(); return process.ExitCode; }
+        }
+        public static void ValidateOwnershipPaths(string root, PSObject[] entries) {
+            string prefix=root.TrimEnd('\\')+"\\";
+            foreach(PSObject entry in entries) {
+                string relative=entry==null || entry.Properties["Path"]==null ? null : Convert.ToString(entry.Properties["Path"].Value);
+                if(String.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative) || relative.IndexOf(':')>=0 ||
+                    System.Text.RegularExpressions.Regex.IsMatch(relative,@"(^|[\\/])\.\.?([\\/]|$)")) throw new InvalidOperationException("Invalid ownership path.");
+                string full=Path.GetFullPath(Path.Combine(root,relative));
+                if(!full.StartsWith(prefix,StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Ownership path escapes the installation.");
+            }
+        }
+        public static bool IsOwnedAsset(PSObject state,string relative,string hash) {
+            var files=state.Properties["Files"].Value as IEnumerable;
+            if(MatchesAsset(files,relative,hash)) return true;
+            var strategies=state.Properties["TtsStrategies"];
+            if(strategies!=null && strategies.Value is IEnumerable) foreach(object item in (IEnumerable)strategies.Value) {
+                if(item==null) continue;
+                var package=PSObject.AsPSObject(item).Properties["PackageFiles"];
+                if(package!=null && MatchesAsset(package.Value as IEnumerable,relative,hash)) return true;
+            }
+            return false;
+        }
+        private static bool MatchesAsset(IEnumerable items,string relative,string hash) {
+            if(items==null) return false;
+            foreach(object item in items) {
+                if(item==null) continue;
+                var value=PSObject.AsPSObject(item);
+                if(value.Properties["Path"]!=null && value.Properties["SHA256"]!=null &&
+                    String.Equals(Convert.ToString(value.Properties["Path"].Value),relative,StringComparison.Ordinal) &&
+                    String.Equals(Convert.ToString(value.Properties["SHA256"].Value),hash,StringComparison.Ordinal)) return true;
+            }
+            return false;
+        }
 
         public static CommandScriptResult InvokeManagedScript(ScriptBlock script, Hashtable arguments) {
             ConsoleHost host = new ConsoleHost();
@@ -178,7 +225,7 @@ namespace WindowsHybridAgenticStack {
             { "tts-start", new string[0] }, { "tts-stop", new string[0] }, { "tts-status", new string[0] },
             { "tts-voice-list", new string[0] }, { "tts-say", new string[] { "Text", "Voice" } },
             { "tts-voice-add", new string[] { "Path", "Name" } },
-            { "tts-voice-remove", new string[] { "Name" } }, { "tts-voice-test", new string[] { "Name" } },
+            { "tts-voice-remove", new string[] { "Name", "Yes" } }, { "tts-voice-test", new string[] { "Name" } },
             { "tts-engine-list", new string[0] },
             { "tts-engine-install", new string[] { "Engine", "Device", "Yes" } },
             { "tts-engine-uninstall", new string[] { "Engine", "DefaultEngine", "Apply", "Yes" } },
@@ -189,22 +236,33 @@ namespace WindowsHybridAgenticStack {
             if (!File.Exists(path)) throw new FileNotFoundException("Stack runtime file is missing; reinstall the selected component.", path);
             ps.Commands.Clear();
             ps.Streams.Error.Clear();
-            ps.AddScript(File.ReadAllText(path), false);
-            if (root != null) ps.AddParameter("InstallPath", root);
+            System.Management.Automation.Language.Token[] tokens;
+            System.Management.Automation.Language.ParseError[] errors;
+            var ast = System.Management.Automation.Language.Parser.ParseInput(File.ReadAllText(path), path, out tokens, out errors);
+            if (errors.Length != 0) throw new InvalidOperationException("Invalid application script: " + errors[0].Message);
+            ps.Runspace.SessionStateProxy.SetVariable("WhasLoadedScript", ast.GetScriptBlock());
+            var parameters = new Hashtable();
+            if (root != null) parameters["InstallPath"] = root;
+            ps.Runspace.SessionStateProxy.SetVariable("WhasLoadedArguments", parameters);
+            ps.AddScript(". $WhasLoadedScript @WhasLoadedArguments", false);
             ps.Invoke();
             if (ps.HadErrors) throw new InvalidOperationException(ps.Streams.Error[0].ToString());
         }
 
         [STAThread]
         public static int Main(string[] args) {
+            var previousEncoding = Console.OutputEncoding;
+            if(Environment.GetEnvironmentVariable("WHAS_PROGRESS_EVENTS")=="1") Console.OutputEncoding = new System.Text.UTF8Encoding(false);
             try { return Run(args); }
             catch (Exception error) { Console.Error.WriteLine("Stack command error: " + error.Message); return 1; }
+            finally { Console.OutputEncoding = previousEncoding; }
         }
 
         private static int Run(string[] args) {
             string executable = Process.GetCurrentProcess().MainModule.FileName;
             string command = Path.GetFileNameWithoutExtension(executable).ToLowerInvariant();
-            bool isAgent = Array.IndexOf(Agents, command) >= 0;
+            bool isUnified = command == "whas";
+            bool isAgent = Array.IndexOf(Agents, command) >= 0 || isUnified;
             if (!isAgent && !TtsParameters.ContainsKey(command)) throw new ArgumentException("Unknown stack command: " + command);
             string registration = Path.Combine(Path.GetDirectoryName(executable), "install-root.txt");
             if (!File.Exists(registration)) throw new FileNotFoundException("Local stack registration is missing.", registration);
@@ -229,7 +287,11 @@ namespace WindowsHybridAgenticStack {
                     }
                     if (isAgent) {
                         Load(ps, Path.Combine(root, "scripts", "configuration.ps1"), null);
-                        Load(ps, Path.Combine(root, "scripts", "agent-commands.ps1"), root);
+                        if (!isUnified || File.Exists(Path.Combine(root, "scripts", "agent-commands.ps1"))) Load(ps, Path.Combine(root, "scripts", "agent-commands.ps1"), root);
+                        if (isUnified) {
+                            Load(ps, Path.Combine(root, "scripts", "agent-strategies.ps1"), root);
+                            Load(ps, Path.Combine(root, "scripts", "whas.ps1"), root);
+                        }
                     }
                     string tts = Path.Combine(root, "tts", "tts.ps1");
                     if (File.Exists(Path.Combine(root, "scripts", "installation-state.ps1")))
@@ -243,7 +305,8 @@ namespace WindowsHybridAgenticStack {
                     ps.Commands.Clear();
                     ps.Streams.Error.Clear();
                     if (isAgent) {
-                        ps.AddCommand("Invoke-AgentStackTask").AddParameter("Kind", command).AddParameter("Arguments", args);
+                        if (isUnified) ps.AddCommand("Invoke-Whas").AddParameter("Arguments", args);
+                        else ps.AddCommand("Invoke-AgentStackTask").AddParameter("Kind", command).AddParameter("Arguments", args);
                     } else {
                         ps.AddCommand(command);
                         string[] allowed = TtsParameters[command];

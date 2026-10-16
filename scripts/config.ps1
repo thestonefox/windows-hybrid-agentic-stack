@@ -60,6 +60,8 @@ try {
 
     $config = Get-Content -LiteralPath $defaultsPath -Raw |
         ConvertFrom-Json
+    if (-not $config.interaction) { $config | Add-Member -NotePropertyName interaction -NotePropertyValue ([pscustomobject]@{location='cloud';runtime='opencode';speech=$false}) }
+    if ($config.tts -and -not $config.tts.PSObject.Properties['voiceDefaults']) { $config.tts | Add-Member -NotePropertyName voiceDefaults -NotePropertyValue ([pscustomobject]@{}) }
 
     if ($config -isnot [pscustomobject]) {
         throw 'Defaults must contain a JSON object'

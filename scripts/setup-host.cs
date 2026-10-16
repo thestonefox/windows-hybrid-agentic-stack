@@ -10,10 +10,15 @@ namespace WindowsHybridAgenticStack {
         private static void Help() {
             Console.WriteLine("Windows Hybrid Agentic Stack setup");
             Console.WriteLine("Usage: whas-setup.exe [--help | --plan | --check | --install | --uninstall] [OPTIONS]");
+            Console.WriteLine("  No arguments / --gui   Open the graphical setup and uninstaller");
+            Console.WriteLine("  --core                 Install shared CLI and graphical applications only");
             Console.WriteLine("  --plan                 Preview selected components and destination");
             Console.WriteLine("  --check                Check selected prerequisites without installing");
             Console.WriteLine("  --cloud --local --voice Select components (default: bundled configuration)");
             Console.WriteLine("  --tts-engine IDS       Comma-separated TTS engines; first is default (--voice)");
+            Console.WriteLine("  --local-models IDS     Comma-separated Ollama models to install (--local)");
+            Console.WriteLine("  --default-local-model ID Choose the default from selected local models");
+            Console.WriteLine("  --default-location ID  Save cloud or local as the default request location");
             Console.WriteLine("  --config PATH          Read JSON configuration overrides");
             Console.WriteLine("  --install-path PATH    Choose an installation destination");
             Console.WriteLine("  --install              Install selected cloud, local and voice components");
@@ -33,6 +38,17 @@ namespace WindowsHybridAgenticStack {
 
         [STAThread]
         public static int Main(string[] args) {
+            if(Environment.GetEnvironmentVariable("WHAS_PROGRESS_EVENTS")=="1") Console.OutputEncoding=new System.Text.UTF8Encoding(false);
+            if (args.Length == 0 || (args.Length == 1 && args[0] == "--gui") || (args.Length == 2 && args[0] == "--gui-render")) {
+                System.Windows.Forms.Application.EnableVisualStyles();
+                System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
+                string executable = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                using (var window = new WhasWindow(true, executable, SetupPayload.StrategyCatalog)) {
+                    if (args.Length == 2) window.Render(args[1]);
+                    else System.Windows.Forms.Application.Run(window);
+                }
+                return 0;
+            }
             try { return Run(args); }
             catch (Exception error) { Console.Error.WriteLine("Setup error: " + error.Message); return 1; }
         }
@@ -55,8 +71,8 @@ namespace WindowsHybridAgenticStack {
         }
 
         private static int Run(string[] args) {
-            string mode = null, config = null, path = null, ttsEngine = null;
-            bool cloud = false, local = false, voice = false;
+            string mode = null, config = null, path = null, ttsEngine = null, localModels = null, defaultLocalModel = null, defaultLocation = null;
+            bool cloud = false, local = false, voice = false, core = false;
             bool yes = false, apply = false, noPath = false, removeModels = false, retainModels = false;
             foreach (string value in args) if (value == null) throw new ArgumentException("Invalid argument.");
             for (int i = 0; i < args.Length; i++) {
@@ -65,8 +81,12 @@ namespace WindowsHybridAgenticStack {
                     if (mode != null) throw new ArgumentException("Choose one setup action.");
                     mode = option == "-h" ? "--help" : option;
                 } else if (option == "--cloud") cloud = true;
+                else if (option == "--core") core = true;
                 else if (option == "--local") local = true;
                 else if (option == "--voice") voice = true;
+                else if (option == "--local-models") { if (localModels != null) throw new ArgumentException("Duplicate local models."); localModels = Next(args, ref i); }
+                else if (option == "--default-location") { if(defaultLocation != null) throw new ArgumentException("Duplicate default location."); defaultLocation=Next(args,ref i); }
+                else if (option == "--default-local-model") { if (defaultLocalModel != null) throw new ArgumentException("Duplicate default model."); defaultLocalModel = Next(args, ref i); }
                 else if (option == "--tts-engine") {
                     if (ttsEngine != null) throw new ArgumentException("Duplicate --tts-engine option.");
                     ttsEngine = Next(args, ref i);
@@ -93,8 +113,9 @@ namespace WindowsHybridAgenticStack {
             if (yes && mode != "--install" && !(mode == "--uninstall" && apply)) throw new ArgumentException("--yes requires installation or applied uninstall.");
             if (noPath && mode != "--install" && mode != "--uninstall") throw new ArgumentException("--no-path requires install or uninstall.");
             if (ttsEngine != null && !voice) throw new ArgumentException("--tts-engine requires --voice.");
+            if ((localModels != null || defaultLocalModel != null) && (!local || mode == "--uninstall")) throw new ArgumentException("Local model selection requires --local setup.");
             if (mode == "--uninstall") {
-                if (cloud || local || voice || config != null || ttsEngine != null) throw new ArgumentException("Uninstall does not accept component or configuration flags.");
+                if (core || cloud || local || voice || config != null || ttsEngine != null || defaultLocation != null) throw new ArgumentException("Uninstall does not accept component or configuration flags.");
                 Hashtable arguments = new Hashtable { { "Apply", apply }, { "PersistCommandPath", !noPath }, { "RetainManagedModels", retainModels }, { "RemoveManagedModels", removeModels } };
                 if (path != null) arguments.Add("InstallPath", path);
                 if (yes) arguments.Add("Confirm", false);
@@ -120,9 +141,12 @@ namespace WindowsHybridAgenticStack {
                     ps.AddScript(SetupPayload.Preview, true)
                         .AddParameter("DefaultsJson", SetupPayload.Defaults)
                         .AddParameter("StrategyCatalogJson", SetupPayload.StrategyCatalog).AddParameter("TtsEngine", ttsEngine)
+                        .AddParameter("LocalModels", localModels).AddParameter("DefaultLocalModel", defaultLocalModel)
+                        .AddParameter("DefaultLocation",defaultLocation)
                         .AddParameter("Interactive", mode == "--install" && !yes)
                         .AddParameter("ConfigPath", config).AddParameter("InstallPath", path)
                         .AddParameter("Cloud", cloud).AddParameter("Local", local).AddParameter("Voice", voice)
+                        .AddParameter("Core", core)
                         .AddParameter("ShowPlan", mode == "--plan");
                     var selection = ps.Invoke();
                     if (ps.HadErrors) throw new InvalidOperationException(ps.Streams.Error[0].ToString());
@@ -130,8 +154,12 @@ namespace WindowsHybridAgenticStack {
                     if (mode == "--plan") return 0;
                     if (mode == "--install") {
                         Hashtable arguments = new Hashtable { { "Cloud", (bool)selection[0].Properties["Cloud"].Value }, { "Local", (bool)selection[0].Properties["Local"].Value }, { "Voice", (bool)selection[0].Properties["Voice"].Value }, { "InstallPath", LanguagePrimitives.ConvertTo<string>(selection[0].Properties["InstallPath"].Value) }, { "Yes", yes }, { "PersistCommandPath", !noPath } };
+                        arguments.Add("Core", core);
                         if ((bool)selection[0].Properties["Voice"].Value)
                             arguments.Add("TtsEngine", LanguagePrimitives.ConvertTo<string>(selection[0].Properties["EngineSelection"].Value));
+                        if (localModels != null) arguments.Add("LocalModels", localModels);
+                        if (defaultLocalModel != null) arguments.Add("DefaultLocalModel", defaultLocalModel);
+                        if (defaultLocation != null) arguments.Add("DefaultLocation",defaultLocation);
                         return SetupRuntime.Run("install.ps1", arguments, LanguagePrimitives.ConvertTo<string>(selection[0].Properties["ConfigJson"].Value));
                     }
                     string[] manifests = LanguagePrimitives.ConvertTo<string[]>(selection[0].Properties["StrategyManifestJsons"].Value);
@@ -143,6 +171,7 @@ namespace WindowsHybridAgenticStack {
                         .AddParameter("Cloud", check == 0 && (bool)selection[0].Properties["Cloud"].Value)
                         .AddParameter("Local", check == 0 && (bool)selection[0].Properties["Local"].Value)
                         .AddParameter("Voice", (bool)selection[0].Properties["Voice"].Value)
+                        .AddParameter("Core", core)
                         .AddParameter("StrategyManifestJson", manifests[check])
                         .AddCommand("Out-Default");
                         ps.Invoke();

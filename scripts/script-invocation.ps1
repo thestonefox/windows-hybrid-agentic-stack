@@ -20,16 +20,8 @@ function Get-StackSetupScript {
             $ancestor = Split-Path -Parent $ancestor
         }
         $state = Read-StackInstallationState $root -ReadOnly
-        if (-not $script:StackOwnedAssetIndex -or -not [object]::ReferenceEquals($script:StackOwnedAssetIndex.State,$state)) {
-            $index = @{}
-            foreach ($asset in @($state.Files) + @($state.TtsStrategies | ForEach-Object { $_.PackageFiles })) {
-                if (-not $index.ContainsKey($asset.Path)) { $index[$asset.Path] = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal) }
-                $null = $index[$asset.Path].Add([string]$asset.SHA256)
-            }
-            $script:StackOwnedAssetIndex = [pscustomobject]@{State=$state;Hashes=$index}
-        }
         $hash = Get-StackFileSHA256 $full
-        if (-not $script:StackOwnedAssetIndex.Hashes.ContainsKey($relative) -or -not $script:StackOwnedAssetIndex.Hashes[$relative].Contains($hash)) { throw "Application script is unowned or changed: $relative" }
+        if (-not [WindowsHybridAgenticStack.CommandHost]::IsOwnedAsset($state,$relative,$hash)) { throw "Application script is unowned or changed: $relative" }
         $tokens = $null; $parseErrors = $null
         $ast = [Management.Automation.Language.Parser]::ParseInput([IO.File]::ReadAllText($full), $full, [ref]$tokens, [ref]$parseErrors)
         if ($parseErrors.Count) { throw 'Invalid installed application script.' }
@@ -52,5 +44,21 @@ function Invoke-StackSetupScript {
     else {
         & $Path @Arguments
         $global:LASTEXITCODE = $LASTEXITCODE
+    }
+}
+
+function Invoke-StackVerifiedHook {
+    param([string]$Path,[string]$SHA256,[hashtable]$Arguments)
+    if((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -cne $SHA256) { throw 'Strategy hook changed; execution refused.' }
+    if(Test-StackSetupHost) {
+        $result=[WindowsHybridAgenticStack.SetupRuntime]::InvokeVerifiedScript($Path,$SHA256,$Arguments)
+        if($result.ExitCode -ne 0) { throw "Strategy hook failed (exit $($result.ExitCode))." }
+        foreach($item in $result.Output) { $item }
+    } elseif($null -ne ('WindowsHybridAgenticStack.CommandHost' -as [type]) -and [WindowsHybridAgenticStack.CommandHost]::ManagedRoot) {
+        Invoke-StackSetupScript -Path $Path -Arguments $Arguments
+        if($LASTEXITCODE -ne 0) { throw "Strategy hook failed (exit $LASTEXITCODE)." }
+    } else {
+        & $Path @Arguments
+        if($LASTEXITCODE -ne 0) { throw "Strategy hook failed (exit $LASTEXITCODE)." }
     }
 }

@@ -70,6 +70,8 @@ function Set-TtsRuntimeSelection {
     $script:TtsPython = Join-Path (Resolve-TtsPackagePath $script:TtsRoot $Selection.Runtime.environmentPath) 'Scripts/python.exe'
     $script:TtsVoiceDirectory = Resolve-TtsPackagePath $script:TtsRoot $Selection.Runtime.voicesPath
     $script:TtsDevice = $Selection.Runtime.device
+    $settings=Get-TtsConfiguration
+    $script:TtsDefaultVoice=if ($settings.VoiceDefaults.ContainsKey($Selection.Runtime.engine)) { $settings.VoiceDefaults[$Selection.Runtime.engine] } else { $settings.DefaultVoice }
 }
 
 function Invoke-TtsEngineCommand {
@@ -97,7 +99,7 @@ function Invoke-TtsEngineCommand {
             if ($Parameters.Name -eq 'default') { throw 'default is the reserved built-in voice.' }
         }
         if ($Command -eq 'Invoke-TtsVoiceRemoveCore') {
-            if ((Read-Host "Delete voice '$($Parameters.Name)' and its reference files? Type YES") -cne 'YES') { Write-Host 'Cancelled.'; return }
+            if (-not $Parameters.Confirmed -and (Read-Host "Delete voice '$($Parameters.Name)' and its reference files? Type YES") -cne 'YES') { Write-Host 'Cancelled.'; return }
             $Parameters.Confirmed = $true
         }
         if ($Command -eq 'Invoke-TtsVoiceAddCore' -and $selection.Package.Manifest.voiceReference.transcriptRequired) {
@@ -117,6 +119,7 @@ function Invoke-TtsEngineCommand {
             if (Test-Path -LiteralPath $script:TtsPidFile) { Remove-Item -LiteralPath $script:TtsPidFile -Force }
         }
         Set-TtsRuntimeSelection $selection
+        if ($Command -eq 'Invoke-TtsSayCore' -and -not $Parameters.Voice) { $Parameters.Voice=$script:TtsDefaultVoice }
         & $Command @Parameters
     }
     finally { $lock.ReleaseMutex(); $lock.Dispose() }
@@ -272,8 +275,8 @@ function tts-status {
     if ($active) { Set-TtsRuntimeSelection (Get-TtsInstalledRuntime $active -State $state) }
     Invoke-TtsStatusCore -Status $status -AlreadyChecked
 }
-function tts-say { param([Parameter(Position=0,Mandatory=$true)][string]$Text,[string]$Voice=$script:TtsDefaultVoice,[string]$Engine) Invoke-TtsEngineCommand $Engine 'Invoke-TtsSayCore' @{Text=$Text;Voice=$Voice} }
+function tts-say { param([Parameter(Position=0,Mandatory=$true)][string]$Text,[string]$Voice,[string]$Engine) Invoke-TtsEngineCommand $Engine 'Invoke-TtsSayCore' @{Text=$Text;Voice=$Voice} }
 function tts-voice-list { param([string]$Engine) Invoke-TtsEngineCommand $Engine 'Invoke-TtsVoiceListCore' }
 function tts-voice-add { param([Parameter(Position=0,Mandatory=$true)][string]$Path,[Parameter(Mandatory=$true)][string]$Name,[string]$Engine) Invoke-TtsEngineCommand $Engine 'Invoke-TtsVoiceAddCore' @{Path=$Path;Name=$Name} }
-function tts-voice-remove { param([Parameter(Position=0,Mandatory=$true)][string]$Name,[string]$Engine) Invoke-TtsEngineCommand $Engine 'Invoke-TtsVoiceRemoveCore' @{Name=$Name} }
+function tts-voice-remove { param([Parameter(Position=0,Mandatory=$true)][string]$Name,[string]$Engine,[switch]$Yes) Invoke-TtsEngineCommand $Engine 'Invoke-TtsVoiceRemoveCore' @{Name=$Name;Confirmed=[bool]$Yes} }
 function tts-voice-test { param([Parameter(Position=0,Mandatory=$true)][string]$Name,[string]$Engine) Invoke-TtsEngineCommand $Engine 'Invoke-TtsVoiceTestCore' @{Name=$Name} }

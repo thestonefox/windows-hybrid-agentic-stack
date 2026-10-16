@@ -2,6 +2,11 @@
   "installation": {
     "directory": null
   },
+  "interaction": {
+    "location": "cloud",
+    "runtime": "opencode",
+    "speech": false
+  },
   "agents": {
     "cloud": {
       "enabled": true,
@@ -19,6 +24,7 @@
     "enabled": true,
     "engine": "chatterbox-turbo",
     "defaultVoice": "default",
+    "voiceDefaults": {},
     "idleTimeoutMinutes": 10,
     "autoStart": true,
     "host": "127.0.0.1",

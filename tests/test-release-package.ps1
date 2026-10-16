@@ -13,13 +13,15 @@ function Write-Fixture {
 }
 function Invoke-FixtureGit {
     param([string[]]$GitArguments)
-    & git -c "safe.directory=$source" -c user.name=Fixture -c user.email=fixture@example.invalid -C $source @GitArguments | Out-Null
+    & git -c "safe.directory=$source" -c core.autocrlf=false -c user.name=Fixture -c user.email=fixture@example.invalid -C $source @GitArguments | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Fixture Git operation failed' }
 }
 try {
     [IO.Directory]::CreateDirectory((Join-Path $source 'scripts')) | Out-Null
     [IO.Directory]::CreateDirectory((Join-Path $source 'tts')) | Out-Null
     Copy-Item -LiteralPath (Join-Path $repo 'scripts/build-release.ps1') -Destination (Join-Path $source 'scripts/build-release.ps1')
+    Copy-Item -LiteralPath (Join-Path $repo 'scripts/agent-strategies.ps1') -Destination (Join-Path $source 'scripts/agent-strategies.ps1')
+    Copy-Item -LiteralPath (Join-Path $repo 'scripts/installation-state.ps1') -Destination (Join-Path $source 'scripts/installation-state.ps1')
     Copy-Item -LiteralPath (Join-Path $repo 'tts/strategy-management.ps1') -Destination (Join-Path $source 'tts/strategy-management.ps1')
     Write-Fixture 'scripts/build-setup.ps1' 'param($OutputPath); [IO.File]::WriteAllText($OutputPath, "fixture executable")'
     Write-Fixture 'README.md' '# Fixture'

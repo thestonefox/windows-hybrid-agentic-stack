@@ -5,6 +5,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('whas-feedback-' + [guid]::NewGuid().ToString('N'))
 $root = Join-Path $fixture 'installation'
 try {
+    Add-Type -Path (Join-Path $repo 'scripts/command-host.cs') -ReferencedAssemblies ([Management.Automation.PSObject].Assembly.Location)
     $session = Start-StackInstallationTracking $root
     [IO.File]::WriteAllBytes((Join-Path $root 'large.bin'), (New-Object byte[] (20MB)))
     $output = @(Complete-StackInstallationTracking $session $true 6>&1) -join "`n"
@@ -27,7 +28,13 @@ try {
     $state.Status='Interrupted'; Write-StackInstallationState $root $state
     if ((Read-StackInstallationState $root -ReadOnly).Status -ne 'Interrupted') { throw 'Read-only snapshot was stale after a write' }
     Write-Host ('PASS: 10,000-entry validated state: cold {0:N0}ms, cached {1:N0}ms' -f $cold,$warm)
-    Add-Type -Path (Join-Path $repo 'scripts/command-host.cs') -ReferencedAssemblies ([Management.Automation.PSObject].Assembly.Location)
+    foreach($bad in @('../escape','C:\escape','safe/../../escape','safe:stream')) {
+        $rejected=$false
+        try { [WindowsHybridAgenticStack.CommandHost]::ValidateOwnershipPaths($root,[Management.Automation.PSObject[]]@([pscustomobject]@{Path=$bad})) } catch { $rejected=$true }
+        if(-not $rejected) { throw "Native validator accepted $bad" }
+    }
+    if(-not [WindowsHybridAgenticStack.CommandHost]::IsOwnedAsset($state,'packages/1.py',('0'*64)) -or
+        [WindowsHybridAgenticStack.CommandHost]::IsOwnedAsset($state,'packages/1.py',('1'*64))) { throw 'Native ownership lookup changed hash enforcement' }
     $events = Join-Path $fixture 'events.txt'
     $previous = $env:WHAS_PROGRESS_EVENTS
     $saved = [Console]::Error

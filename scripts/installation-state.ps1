@@ -5,12 +5,13 @@ function Get-StackCommandNames {
     param([switch]$Legacy)
     $names = @('agent','agentdo','localagent','localagentdo','tts-start','tts-stop','tts-status',
         'tts-say','tts-voice-list','tts-voice-add','tts-voice-remove','tts-voice-test')
-    if (-not $Legacy) { $names += @('tts-engine-list','tts-engine-install','tts-engine-uninstall','tts-engine-default') }
+    if (-not $Legacy) { $names += @('tts-engine-list','tts-engine-install','tts-engine-uninstall','tts-engine-default','whas') }
     return $names
 }
 function Test-StackCommandNames {
     param([string[]]$Names)
     return (@(Compare-Object @(Get-StackCommandNames) $Names).Count -eq 0 -or
+        @(Compare-Object @(Get-StackCommandNames | Where-Object { $_ -ne 'whas' }) $Names).Count -eq 0 -or
         @(Compare-Object @(Get-StackCommandNames -Legacy) $Names).Count -eq 0)
 }
 
@@ -206,11 +207,39 @@ function Read-StackInstallationState {
                 $strategy.Context.VoicesPath -notin @('voices',"voices/$($strategy.Id)")) { throw 'Invalid strategy resource paths.' }
         }
     }
-    foreach ($entry in @($state.Files) + @($state.OriginalFiles)) {
-        $null = Resolve-StackOwnedPath -Root $Root -Relative $entry.Path
+    $entries=@($state.Files) + @($state.OriginalFiles)
+    if ($null -ne ('WindowsHybridAgenticStack.CommandHost' -as [type])) {
+        [WindowsHybridAgenticStack.CommandHost]::ValidateOwnershipPaths($Root, [Management.Automation.PSObject[]]$entries)
+    } else {
+        foreach ($entry in $entries) { $null = Resolve-StackOwnedPath -Root $Root -Relative $entry.Path }
     }
     if ($ReadOnly) { $script:StackReadSnapshot = [pscustomobject]@{Root=$Root;Json=$json;State=$state} }
     return $state
+}
+
+function Get-StackAgentHooks {
+    param([string]$Root,$State)
+    $assets=@{}
+    foreach($entry in $State.Files) { $assets[$entry.Path]=$entry.SHA256 }
+    foreach($relative in @($assets.Keys | Where-Object { $_ -cmatch '^agents/strategies/[a-z][a-z0-9-]{0,47}/manifest\.json$' })) {
+        $id=$relative.Split('/')[2]
+        $prefix="agents/runtime/$id/"
+        if(-not @($State.Files | Where-Object { $_.Path.StartsWith($prefix,[StringComparison]::Ordinal) }).Count) { continue }
+        $manifestPath=Resolve-StackOwnedPath $Root $relative
+        if(-not (Test-Path -LiteralPath $manifestPath)) { continue }
+        if((Get-StackFileSHA256 $manifestPath) -cne $assets[$relative]) { throw 'Agent manifest changed; cleanup hook execution requires repair.' }
+        $manifest=[IO.File]::ReadAllText($manifestPath)|ConvertFrom-Json
+        if($manifest.schemaVersion -ne 1 -or $manifest.id -cne $id) { throw 'Invalid agent strategy identity.' }
+        if(-not $manifest.capabilities.managedInstall) { continue }
+        if(-not $manifest.entrypoints.uninstall -or $manifest.files -cnotcontains $manifest.entrypoints.uninstall) { throw 'Agent strategy requires a declared uninstall hook.' }
+        $package="agents/strategies/$id/"
+        foreach($file in $manifest.files) {
+            $path=Resolve-StackOwnedPath $Root ($package+$file)
+            if(-not $assets.ContainsKey($package+$file) -or -not (Test-Path -LiteralPath $path) -or (Get-StackFileSHA256 $path) -cne $assets[$package+$file]) { throw 'Agent strategy is unowned or modified; cleanup hook execution requires repair.' }
+        }
+        $hook=$package+$manifest.entrypoints.uninstall
+        [pscustomobject]@{Id=$id;Path=(Resolve-StackOwnedPath $Root $hook);SHA256=$assets[$hook];Context=[pscustomobject]@{InstallPath=$Root;RuntimeId=$id}}
+    }
 }
 
 function Get-StackOllamaModels {
@@ -240,7 +269,7 @@ function Test-StackGeneratedFile {
 
 function Start-StackInstallationTracking {
     [CmdletBinding()]
-    param([string]$InstallPath, [string]$ManagedModelName)
+    param([string]$InstallPath, [string]$ManagedModelName, [string[]]$ManagedModelNames)
     $root = Assert-StackInstallationRoot -Root $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallPath)
     $registration = Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack'
     if ($registration -ieq $root -or $registration.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase) -or
@@ -297,7 +326,8 @@ function Start-StackInstallationTracking {
     foreach ($entry in $state.Files) { $known[$entry.Path] = $entry }
     $originals = @{}
     foreach ($entry in $state.OriginalFiles) { $originals[$entry.Path] = $entry }
-    $managedFiles = @('opencode.json','AGENTS.md','config/defaults.json','config/config.json',
+    $managedFiles = @('opencode.json','AGENTS.md','config/defaults.json','config/config.json','whas-gui.exe','whas-setup.exe','.whas-app-build.json',
+        'scripts/whas.ps1','scripts/agent-strategies.ps1',
         'scripts/agent-commands.ps1','scripts/config.ps1','scripts/configuration.ps1',
         'scripts/command-registration.ps1','scripts/installation-state.ps1','scripts/uninstall.ps1','scripts/script-invocation.ps1','scripts/check-prerequisites.ps1',
         'tts/tts.ps1','tts/tts_service.py','tts/strategy-management.ps1','tts/engine-management.ps1','tts/install-tts.ps1','tts/strategy.schema.json','tts/runtime.json','tts/engines.json','uninstall.ps1')
@@ -318,7 +348,7 @@ function Start-StackInstallationTracking {
     }
     $state.OriginalFiles = @($originals.Values)
     $modelBefore = @()
-    if ($ManagedModelName) { $modelBefore = @(Get-StackOllamaModels) }
+    if ($ManagedModelName -or $ManagedModelNames.Count) { $modelBefore = @(Get-StackOllamaModels) }
     $regBefore = @{}
     $regBin = Join-Path $registration 'bin'
     if (Test-Path -LiteralPath $regBin) {
@@ -327,7 +357,7 @@ function Start-StackInstallationTracking {
     if (-not (Test-Path -LiteralPath $root)) { New-Item -ItemType Directory -Path $root -Force | Out-Null }
     $state.Status = 'Installing'
     Write-StackInstallationState -Root $root -State $state
-    [pscustomobject]@{ Root = $root; State = $state; BeforePaths = @($tree.Files); RegBefore = $regBefore; ModelBefore = $modelBefore; ModelName = $ManagedModelName }
+    [pscustomobject]@{ Root = $root; State = $state; BeforePaths = @($tree.Files); RegBefore = $regBefore; ModelBefore = $modelBefore; ModelName = $ManagedModelName; ModelNames = $ManagedModelNames }
 }
 
 function Complete-StackInstallationTracking {
@@ -355,7 +385,7 @@ function Complete-StackInstallationTracking {
     foreach ($relative in $tree.Files) {
         $progress.Completed = ++$inspected
         if ($progress.Timer.ElapsedMilliseconds - $progress.LastUpdate -ge 2000) { Write-StackOperationProgress $progress }
-        if ($relative -eq '.whas-installation.json' -or $relative -like 'voices/*' -or
+        if ($relative -eq '.whas-installation.json' -or $relative -like 'voices/*' -or $relative -like 'agents/data/*' -or $relative -like 'agents/runtime/*/home/profiles/*' -or
             ($state.PreexistingVenv -and $relative -like '.venv/*')) { continue }
         if ($originals.Contains($relative) -or -not $preexisting.Contains($relative)) {
             $files.Add([pscustomobject]@{ Path = $relative; SHA256 = Get-StackFileSHA256 ([IO.Path]::Combine($root, $relative)) -AllowConcurrentWrite:(Test-StackGeneratedFile $relative $state) -Progress $progress })
@@ -364,15 +394,17 @@ function Complete-StackInstallationTracking {
     $state.Files = $files.ToArray()
     Write-StackOperationProgress $progress -Completed $inspected -Total $tree.Files.Count -Force
     $state.Directories = @($tree.Directories | Where-Object { @($state.PreexistingDirectories) -notcontains $_ })
-    if ($Session.ModelName) {
+    $modelNames = if ($Session.ModelNames.Count) { $Session.ModelNames } elseif ($Session.ModelName) { @($Session.ModelName) } else { @() }
+    foreach ($modelName in $modelNames) {
         try {
-            $tag = $Session.ModelName + ':latest'
+            $tag = if ($modelName -match ':[^/]+$') { $modelName } else { $modelName + ':latest' }
             $current = @(Get-StackOllamaModels | Where-Object name -eq $tag)
             $before = @($Session.ModelBefore | Where-Object name -eq $tag)
             $previousModel = @($state.Models | Where-Object Name -eq $tag)
             if ($current.Count -eq 1) {
                 $owned = $before.Count -eq 0 -or ($previousModel.Count -eq 1 -and $previousModel[0].Created -and $previousModel[0].Digest -ceq $current[0].digest)
-                $state.Models = @($state.Models | Where-Object Name -ne $tag) + @([pscustomobject]@{ Name = $tag; Digest = $current[0].digest; Created = $owned })
+                $kind=if ($modelName -match '^whas-[a-z0-9-]+-ctx[0-9]+$' -or -not $Session.ModelNames.Count) { 'Configured' } else { 'Source' }
+                $state.Models = @($state.Models | Where-Object Name -ne $tag) + @([pscustomobject]@{ Name = $tag; Digest = $current[0].digest; Created = $owned; Kind=$kind })
             }
         } catch { Write-Warning "Model ownership could not be verified; unverified models will be retained: $_" }
     }
@@ -380,7 +412,7 @@ function Complete-StackInstallationTracking {
     foreach ($entry in $state.RegistrationBackups) { $backups[$entry.Name] = $entry }
     $regBin = Join-Path $state.RegistrationDirectory 'bin'
     if (Test-Path -LiteralPath $regBin) {
-        foreach ($file in Get-ChildItem -LiteralPath $regBin -File | Where-Object { $_.Name -match '^(agent|agentdo|localagent|localagentdo|tts-(start|stop|status|say|voice-(list|add|remove|test)|engine-(list|install|uninstall|default)))\.exe\.bak\.[a-f0-9]{32}$|^install-root\.txt\.bak\.[a-f0-9]{32}$' }) {
+        foreach ($file in Get-ChildItem -LiteralPath $regBin -File | Where-Object { $_.Name -match '^(whas|agent|agentdo|localagent|localagentdo|tts-(start|stop|status|say|voice-(list|add|remove|test)|engine-(list|install|uninstall|default)))\.exe\.bak\.[a-f0-9]{32}$|^install-root\.txt\.bak\.[a-f0-9]{32}$' }) {
             if (-not $Session.RegBefore.ContainsKey($file.Name)) { $backups[$file.Name] = [pscustomobject]@{ Name = $file.Name; SHA256 = Get-StackFileSHA256 $file.FullName } }
         }
     }

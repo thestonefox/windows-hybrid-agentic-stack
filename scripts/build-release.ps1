@@ -16,6 +16,13 @@ if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[a-f0-9]{40}$') { throw 'Cannot 
 $tracked = @(& git -c "safe.directory=$repo" -C $repo ls-files)
 if ($LASTEXITCODE -ne 0) { throw 'Cannot enumerate tracked release sources.' }
 $packages = @(Get-TtsStrategies $repo)
+. (Join-Path $repo 'scripts/installation-state.ps1')
+. (Join-Path $repo 'scripts/agent-strategies.ps1') -InstallPath $repo
+foreach ($strategy in Get-WhasAgentStrategies) {
+    foreach ($file in $strategy.Manifest.files) {
+        if ($tracked -cnotcontains "agents/strategies/$($strategy.Manifest.id)/$file") { throw 'Release agent strategy assets must be committed, including ignored files.' }
+    }
+}
 foreach ($package in $packages) {
     foreach ($file in $package.Files) {
         if ($tracked -cnotcontains "tts/strategies/$($package.Manifest.id)/$file") { throw 'Release strategy assets must be committed, including ignored files.' }

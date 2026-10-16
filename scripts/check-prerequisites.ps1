@@ -28,6 +28,7 @@
 
 [CmdletBinding()]
 param(
+    [switch]$Core,
     [switch]$Cloud,
     [switch]$Local,
     [switch]$Voice,
@@ -37,7 +38,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # Without explicit options, inspect all three components.
-if (-not ($Cloud -or $Local -or $Voice)) {
+if (-not $Core -and -not ($Cloud -or $Local -or $Voice)) {
     $Cloud = $true
     $Local = $true
     $Voice = $true
@@ -59,6 +60,9 @@ function Add-Check {
         Status    = $Status
         Details   = $Details
     })
+    if ($null -ne ('WindowsHybridAgenticStack.OperationActivity' -as [type])) {
+        [WindowsHybridAgenticStack.OperationActivity]::Check($Component,$Status,$Details,$Required)
+    }
 }
 
 function Get-Executable {

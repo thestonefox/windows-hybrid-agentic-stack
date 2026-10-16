@@ -36,10 +36,14 @@
 [CmdletBinding()]
 param(
     [switch]$Check,
+    [switch]$Core,
     [switch]$Cloud,
     [switch]$Local,
     [switch]$Voice,
     [string]$TtsEngine,
+    [string]$LocalModels,
+    [string]$DefaultLocalModel,
+    [ValidateSet('cloud','local')][string]$DefaultLocation,
     [switch]$Yes,
     [string]$InstallPath,
     [bool]$PersistCommandPath = $true
@@ -173,7 +177,7 @@ try {
     }
 
     . (Get-StackSetupScript (Join-Path $repoRoot 'tts\strategy-management.ps1'))
-    if ($Check -and -not ($Cloud -or $Local -or $Voice)) {
+    if ($Check -and -not $Core -and -not ($Cloud -or $Local -or $Voice)) {
         $Cloud = $true
         $Local = $true
         $Voice = $true
@@ -181,7 +185,7 @@ try {
     if ($TtsEngine -and -not $Voice) { throw '-TtsEngine requires -Voice.' }
     $requestedEngines = @()
     if ($TtsEngine) { $requestedEngines = @($TtsEngine.Split(',') | ForEach-Object { $_.Trim() }); $config.tts.engine = $requestedEngines[0] }
-    $explicitSelection = $Cloud -or $Local -or $Voice
+    $explicitSelection = $Core -or $Cloud -or $Local -or $Voice
 
     if (-not $explicitSelection) {
         Write-Host ''
@@ -201,8 +205,18 @@ try {
             -Default ([bool]$config.tts.enabled)
     }
 
-    if (-not ($Cloud -or $Local -or $Voice)) {
+    if (-not ($Core -or $Cloud -or $Local -or $Voice)) {
         throw 'No components selected.'
+    }
+    if (($LocalModels -or $DefaultLocalModel) -and -not $Local) { throw 'Local model selection requires -Local.' }
+    if ($DefaultLocalModel) { $config.agents.local.model = $DefaultLocalModel }
+    $localModelSelection = if ($LocalModels) { @($LocalModels.Split(',') | ForEach-Object { $_.Trim() }) } else { @([string]$config.agents.local.model) }
+    if ($Local) {
+        if ($localModelSelection -notcontains $config.agents.local.model) { throw 'The default local model must be in -LocalModels.' }
+        if (@($localModelSelection | Select-Object -Unique).Count -ne $localModelSelection.Count) { throw 'Duplicate local model selection.' }
+        foreach ($modelId in $localModelSelection) {
+            if ($modelId -cnotmatch '^[a-zA-Z0-9][a-zA-Z0-9._/-]*(?::[a-zA-Z0-9._-]+)?$' -or $modelId -match '(^|/)\.\.?(/|$)') { throw "Invalid Ollama model: $modelId" }
+        }
     }
 
     if ($Cloud -or $Local) {
@@ -293,6 +307,7 @@ try {
     Write-Host ''
 
     $checkArguments = @{
+        Core = [bool]$Core
         Cloud = [bool]$Cloud
         Local = [bool]$Local
         Voice = [bool]$Voice
@@ -330,11 +345,32 @@ try {
     if ($Local) {
         $safeModel = ([string]$config.agents.local.model).ToLowerInvariant() -replace '[^a-z0-9-]', '-'
         $trackingArguments.ManagedModelName = 'whas-' + $safeModel.Trim('-') + '-ctx' + $config.agents.local.contextSize
+        $trackingArguments.ManagedModelNames = @($localModelSelection) + @($localModelSelection | ForEach-Object { 'whas-' + (($_.ToLowerInvariant() -replace '[^a-z0-9-]', '-').Trim('-')) + '-ctx' + $config.agents.local.contextSize })
     }
     $operationLock = Enter-StackOperationLock $InstallPath
     $trackingSession = Start-StackInstallationTracking @trackingArguments
-    foreach ($relative in @('uninstall.ps1','scripts\uninstall.ps1','scripts\installation-state.ps1','scripts\command-registration.ps1','scripts\script-invocation.ps1','scripts\configuration.ps1','tts\strategy-management.ps1','scripts\check-prerequisites.ps1')) {
+    foreach ($relative in @('uninstall.ps1','scripts\uninstall.ps1','scripts\installation-state.ps1','scripts\command-registration.ps1','scripts\script-invocation.ps1','scripts\configuration.ps1','scripts\agent-strategies.ps1','scripts\whas.ps1','tts\strategy-management.ps1','scripts\check-prerequisites.ps1')) {
         Copy-StackFile -Source (Join-Path $repoRoot $relative) -Destination (Join-Path $InstallPath $relative)
+    }
+    foreach($relative in @('config/defaults.json','scripts/agent-commands.ps1','tts/tts.ps1','tts/install-tts.ps1','tts/tts_service.py','tts/engine-management.ps1','tts/strategy.schema.json')) {
+        Copy-StackFile -Source (Join-Path $repoRoot $relative) -Destination (Join-Path $InstallPath $relative)
+    }
+    foreach($package in @(Get-TtsStrategies $repoRoot)) {
+        foreach($asset in $package.Files) {
+            $relative="tts/strategies/$($package.Manifest.id)/$asset"
+            Copy-StackFile -Source (Join-Path $repoRoot $relative) -Destination (Join-Path $InstallPath $relative)
+        }
+    }
+    $engineRegistryPath=Join-Path $InstallPath 'tts/engines.json'
+    if(-not $Voice -and -not (Test-Path -LiteralPath $engineRegistryPath)) {
+        [IO.File]::WriteAllText($engineRegistryPath,'{"schemaVersion":1,"defaultEngine":null}',(New-Object Text.UTF8Encoding($false)))
+    }
+    . (Get-StackSetupScript (Join-Path $repoRoot 'scripts/agent-strategies.ps1')) -InstallPath $repoRoot
+    foreach ($strategy in Get-WhasAgentStrategies) {
+        foreach ($asset in $strategy.Manifest.files) {
+            $relative = "agents/strategies/$($strategy.Manifest.id)/$asset"
+            Copy-StackFile -Source (Join-Path $repoRoot $relative) -Destination (Join-Path $InstallPath $relative)
+        }
     }
 
     if ($Cloud -or $Local) {
@@ -347,6 +383,7 @@ try {
             $setupCloudModel = "$($config.agents.cloud.provider)/$setupCloudModel"
         }
         $setupArguments = @{
+            Yes = [bool]$Yes
             Cloud = [bool]$Cloud
             Local = [bool]$Local
             InstallPath = $InstallPath
@@ -359,6 +396,13 @@ try {
 
         if ($LASTEXITCODE -ne 0) {
             throw 'OpenCode agent setup failed.'
+        }
+        foreach ($additionalModel in @($localModelSelection | Where-Object { $_ -cne $config.agents.local.model })) {
+            $extra = $setupArguments.Clone()
+            $extra.Cloud = $false
+            $extra.LocalModel = $additionalModel
+            Invoke-StackSetupScript -Path $agentSetupScript -Arguments $extra
+            if ($LASTEXITCODE -ne 0) { throw "Additional local model setup failed: $additionalModel" }
         }
 
         Write-Host ''
@@ -453,13 +497,49 @@ try {
             Write-Host "Runtime local model: $runtimeModel"
         }
     Write-Host ''
-    if ($Voice) {
+    if ($Core -or $Voice -or $Cloud -or $Local) {
         $runtimeConfigPath = Join-Path $InstallPath 'config/config.json'
         $runtimeConfig = if (Test-Path -LiteralPath $runtimeConfigPath) { Get-Content -LiteralPath $runtimeConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { [pscustomobject]@{} }
-        if ($null -eq $runtimeConfig.tts) { $runtimeConfig | Add-Member -NotePropertyName tts -NotePropertyValue ([pscustomobject]@{}) }
-        $runtimeConfig.tts | Add-Member -NotePropertyName engine -NotePropertyValue $config.tts.engine -Force
+        if ($Voice) {
+            if ($null -eq $runtimeConfig.tts) { $runtimeConfig | Add-Member -NotePropertyName tts -NotePropertyValue ([pscustomobject]@{}) }
+            $runtimeConfig.tts | Add-Member -NotePropertyName engine -NotePropertyValue $config.tts.engine -Force
+        }
+        if (-not $runtimeConfig.interaction) {
+            $runtimeConfig | Add-Member -NotePropertyName interaction -NotePropertyValue ([pscustomobject]@{location=$(if ($Local -and -not $Cloud) {'local'} else {$config.interaction.location});runtime=$(if($Cloud -or $Local){$config.interaction.runtime}else{$null});speech=$config.interaction.speech})
+        }
+        if($DefaultLocation) { $runtimeConfig.interaction.location=$DefaultLocation }
         [IO.File]::WriteAllText($runtimeConfigPath, ($runtimeConfig | ConvertTo-Json -Depth 12), (New-Object Text.UTF8Encoding($false)))
     }
+    Write-Host 'Building graphical usage and maintenance applications...'
+    . (Get-StackSetupScript $registrationHelper)
+    Install-StackCommandRegistration -InstallPath $InstallPath -PersistPath $PersistCommandPath
+    $fingerprint=(Invoke-StackSetupScript -Path (Join-Path $repoRoot 'scripts/build-setup.ps1') -Arguments @{Fingerprint=$true} | Out-String).Trim()
+    $stampPath=Join-Path $InstallPath '.whas-app-build.json'
+    $reuseApps=$false
+    if(Test-Path -LiteralPath $stampPath) {
+        $valid=$true
+        foreach($name in @('.whas-app-build.json','whas-gui.exe','whas-setup.exe')) {
+            $entry=@($trackingSession.State.Files | Where-Object { $_.Path -ceq $name })
+            $file=Join-Path $InstallPath $name
+            if($entry.Count -ne 1 -or -not (Test-Path -LiteralPath $file) -or (Get-StackFileSHA256 $file) -cne $entry[0].SHA256) { $valid=$false; break }
+        }
+        if($valid) { $stamp=[IO.File]::ReadAllText($stampPath)|ConvertFrom-Json; $reuseApps=$stamp.sourceSHA256 -ceq $fingerprint }
+    }
+    if(-not $reuseApps) {
+    $buildDirectory=Join-Path ([IO.Path]::GetTempPath()) ('whas-app-build-'+[guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($buildDirectory)|Out-Null
+    try {
+        Invoke-StackSetupScript -Path (Join-Path $repoRoot 'scripts/build-gui.ps1') -Arguments @{OutputPath=(Join-Path $buildDirectory 'whas-gui.exe')}
+        if($LASTEXITCODE -ne 0) { throw 'Graphical client build failed.' }
+        Invoke-StackSetupScript -Path (Join-Path $repoRoot 'scripts/build-setup.ps1') -Arguments @{OutputPath=(Join-Path $buildDirectory 'whas-setup.exe')}
+        if($LASTEXITCODE -ne 0) { throw 'Graphical maintenance build failed.' }
+        foreach($name in @('whas-gui.exe','whas-setup.exe')) { Copy-StackFile -Source (Join-Path $buildDirectory $name) -Destination (Join-Path $InstallPath $name) }
+        [IO.File]::WriteAllText($stampPath,(@{sourceSHA256=$fingerprint}|ConvertTo-Json),(New-Object Text.UTF8Encoding($false)))
+    } finally {
+        foreach($name in @('whas-gui.exe','whas-setup.exe')) { $file=Join-Path $buildDirectory $name; if(Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force } }
+        if(-not @(Get-ChildItem -LiteralPath $buildDirectory -Force).Count) { Remove-Item -LiteralPath $buildDirectory }
+    }
+    } else { Write-Host 'Graphical applications unchanged; reusing verified builds.' }
     Complete-StackInstallationTracking -Session $trackingSession -Succeeded $true
     $trackingSession = $null
     $installationSucceeded = $true

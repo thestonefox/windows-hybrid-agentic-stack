@@ -22,6 +22,7 @@ function Get-StackUninstallPlan {
         ManifestSHA256 = $null; RegistrationSHA256 = $null
         UnregisterCommands = $false; RemoveManagedModels = [bool]$RemoveManagedModels
         TtsHooks = @()
+        AgentHooks = @()
         AlreadyAbsent = -not (Test-Path -LiteralPath $root)
     }
     if ($null -eq $state) {
@@ -136,7 +137,9 @@ function Get-StackUninstallPlan {
         }
     }
     foreach ($model in $state.Models) {
-        if ($model.Name -notmatch '^whas-[a-z0-9-]+:latest$' -or $model.Digest -notmatch '^(sha256:)?[a-f0-9]{64}$') { throw 'Invalid managed-model ownership record.' }
+        if($model.Kind -and $model.Kind -cnotin @('Source','Configured')) { throw 'Unknown managed-model ownership kind.' }
+        $validName = if ($model.Kind -ceq 'Source') { $model.Name -cmatch '^[a-zA-Z0-9][a-zA-Z0-9._/-]*:[a-zA-Z0-9._-]+$' -and $model.Name -notmatch '(^|/)\.\.?(/|$)' } else { $model.Name -match '^whas-[a-z0-9-]+:latest$' }
+        if (-not $validName -or $model.Digest -notmatch '^(sha256:)?[a-f0-9]{64}$' -or $model.Created -isnot [bool]) { throw 'Invalid managed-model ownership record.' }
         if ($RemoveManagedModels -and $model.Created -and $otherModels -notcontains $model.Name) {
             # One read-only inventory for all eligible managed-model checks.
             if ($null -eq (Get-Variable inventory -Scope Local -ErrorAction Ignore)) { $inventory = @(Get-StackOllamaModels) }
@@ -150,6 +153,7 @@ function Get-StackUninstallPlan {
         if (-not (Get-Command Get-TtsInstalledHooks -ErrorAction Ignore)) { throw 'TTS strategy cleanup helper is unavailable.' }
         $plan.TtsHooks = @(Get-TtsInstalledHooks $root $state)
     }
+    $plan.AgentHooks=@(Get-StackAgentHooks $root $state)
     return $plan
 }
 
@@ -221,7 +225,7 @@ function Invoke-StackUninstall {
     $current = Get-StackUninstallPlan -InstallPath $Plan.Root -RemoveManagedModels:$Plan.RemoveManagedModels -ShowProgress
     $receipt = [ordered]@{ StartedAtUtc = [DateTime]::UtcNow.ToString('o'); InstallationId = $current.State.InstallationId;
         InstallPath = $current.Root; DeletedFiles = [Collections.Generic.List[string]]::new(); RestoredFiles = @(); RemovedModels = @(); KeptFiles = $current.KeepFiles;
-        TtsStrategies = @(); KeptModels = $current.KeepModels; PreviousRegistrationRestored = $false; Completed = $false }
+        TtsStrategies = @(); AgentStrategies = @(); KeptModels = $current.KeepModels; PreviousRegistrationRestored = $false; Completed = $false }
     New-Item -ItemType Directory -Path $receiptRoot -Force -ErrorAction Stop | Out-Null
     $receiptPath = Join-Path $receiptRoot ('uninstall-' + [guid]::NewGuid().ToString('N') + '.json')
     try {
@@ -236,6 +240,11 @@ function Invoke-StackUninstall {
             Write-Host "Running TTS cleanup: $($hook.Id)..."
             Invoke-TtsVerifiedHook -Path $hook.Path -SHA256 $hook.SHA256 -Arguments @{Context=$hook.Context}
             $receipt.TtsStrategies += [pscustomobject]@{Id=$hook.Id; HookCompleted=$true}
+        }
+        foreach($hook in $current.AgentHooks) {
+            Write-Host "Running agent cleanup: $($hook.Id)..."
+            Invoke-StackVerifiedHook -Path $hook.Path -SHA256 $hook.SHA256 -Arguments @{Context=$hook.Context}
+            $receipt.AgentStrategies += [pscustomobject]@{Id=$hook.Id; HookCompleted=$true}
         }
         # Hooks are trusted code. Revalidate file ownership after they return.
         Write-Host 'Rechecking ownership after strategy cleanup...'

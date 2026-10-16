@@ -19,6 +19,12 @@ function Merge-Configuration {
 
         $targetProperty = $Target.PSObject.Properties[$name]
 
+        if ($Prefix -eq 'tts.voiceDefaults' -and $null -eq $targetProperty) {
+            if ($name -cnotmatch '^[a-z][a-z0-9-]{0,47}$' -or $property.Value -isnot [string] -or $property.Value -cnotmatch '^[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}$') { throw 'Invalid engine voice default.' }
+            $Target | Add-Member -NotePropertyName $name -NotePropertyValue $property.Value
+            continue
+        }
+
         if ($null -eq $targetProperty) {
             throw "Unknown configuration setting: $key"
         }
@@ -45,6 +51,17 @@ function Assert-Configuration {
     param([pscustomobject]$Config)
 
     $errors = [System.Collections.Generic.List[string]]::new()
+    if ($Config.interaction) {
+        if ($Config.interaction.location -notin @('local','cloud')) { $errors.Add('interaction.location must be local or cloud') }
+        if ($null -ne $Config.interaction.runtime -and $Config.interaction.runtime -cnotmatch '^[a-z][a-z0-9-]{0,47}$') { $errors.Add('interaction.runtime must be a strategy ID or null') }
+        if ($Config.interaction.speech -isnot [bool]) { $errors.Add('interaction.speech must be a boolean') }
+    }
+    if ($Config.tts.voiceDefaults) {
+        if ($Config.tts.voiceDefaults -isnot [pscustomobject]) { $errors.Add('tts.voiceDefaults must be an object') }
+        else { foreach($entry in $Config.tts.voiceDefaults.PSObject.Properties) {
+            if ($entry.Name -cnotmatch '^[a-z][a-z0-9-]{0,47}$' -or $entry.Value -isnot [string] -or $entry.Value -cnotmatch '^[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}$') { $errors.Add('Invalid engine voice default') }
+        } }
+    }
 
     $directory = $Config.installation.directory
 
@@ -157,6 +174,8 @@ function Get-StackConfiguration {
         throw "Defaults file not found: $defaultsPath"
     }
     $config = Get-Content -LiteralPath $defaultsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $config.interaction) { $config | Add-Member -NotePropertyName interaction -NotePropertyValue ([pscustomobject]@{location='cloud';runtime='opencode';speech=$false}) }
+    if ($config.tts -and -not $config.tts.PSObject.Properties['voiceDefaults']) { $config.tts | Add-Member -NotePropertyName voiceDefaults -NotePropertyValue ([pscustomobject]@{}) }
     if ($config -isnot [pscustomobject]) { throw 'Defaults must contain a JSON object' }
     if (Test-Path -LiteralPath $ConfigPath) {
         if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {

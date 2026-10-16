@@ -4,10 +4,14 @@ param(
     [string]$DefaultsJson,
     [string]$StrategyCatalogJson,
     [string]$TtsEngine,
+    [string]$LocalModels,
+    [string]$DefaultLocalModel,
+    [string]$DefaultLocation,
     [bool]$Interactive,
     [string]$ConfigPath,
     [string]$InstallPath,
     [bool]$Cloud,
+    [bool]$Core,
     [bool]$Local,
     [bool]$Voice,
     [bool]$ShowPlan
@@ -20,13 +24,28 @@ if ($ConfigPath) {
     Merge-Configuration -Target $config -Overrides $overrides
 }
 $errors = @(Assert-Configuration -Config $config)
+if($DefaultLocation) {
+    if($DefaultLocation -cnotin @('cloud','local')) { throw 'Default location must be local or cloud.' }
+    $config.interaction.location=$DefaultLocation
+}
 if ($errors.Count) { throw ($errors -join [Environment]::NewLine) }
-if (-not ($Cloud -or $Local -or $Voice)) {
+if (-not $Core -and -not ($Cloud -or $Local -or $Voice)) {
     $Cloud = $config.agents.cloud.enabled
     $Local = $config.agents.local.enabled
     $Voice = $config.tts.enabled
 }
-if (-not ($Cloud -or $Local -or $Voice)) { throw 'No components selected.' }
+if (-not ($Core -or $Cloud -or $Local -or $Voice)) { throw 'No components selected.' }
+if(-not $DefaultLocation -and $Local -and -not $Cloud) { $config.interaction.location='local' }
+if (($LocalModels -or $DefaultLocalModel) -and -not $Local) { throw 'Local model selection requires --local.' }
+if ($DefaultLocalModel) { $config.agents.local.model = $DefaultLocalModel }
+$modelSelection = if ($LocalModels) { @($LocalModels.Split(',') | ForEach-Object { $_.Trim() }) } else { @([string]$config.agents.local.model) }
+if ($Local) {
+    if ($modelSelection -notcontains $config.agents.local.model) { throw 'Default local model must be in the selected models.' }
+    if (@($modelSelection | Select-Object -Unique).Count -ne $modelSelection.Count) { throw 'Duplicate local model selection.' }
+    foreach ($modelId in $modelSelection) {
+        if ($modelId -cnotmatch '^[a-zA-Z0-9][a-zA-Z0-9._/-]*(?::[a-zA-Z0-9._-]+)?$' -or $modelId -match '(^|/)\.\.?(/|$)') { throw 'Invalid Ollama model selection.' }
+    }
+}
 if (-not $InstallPath) { $InstallPath = $config.installation.directory }
 if (-not $InstallPath) { $InstallPath = Join-Path $HOME 'AI\WindowsHybridAgenticStack' }
 $InstallPath = [Environment]::ExpandEnvironmentVariables($InstallPath)
@@ -60,6 +79,8 @@ if ($ShowPlan) {
     Write-Host "Directory:    $InstallPath"
     Write-Host "Cloud agents: $Cloud"
     Write-Host "Local agents: $Local"
+    Write-Host "Default location: $($config.interaction.location)"
+    if ($Local) { Write-Host "Local models: $($modelSelection -join ', ')"; Write-Host "Default local model: $($config.agents.local.model)" }
     Write-Host "Voice output: $Voice"
     if ($Cloud) { Write-Host ('Cloud model:  ' + $(if ($config.agents.cloud.model) { $config.agents.cloud.model } else { 'OpenCode default' })) }
     if ($Local) {

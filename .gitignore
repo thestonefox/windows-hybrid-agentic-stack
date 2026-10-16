@@ -46,3 +46,6 @@ Thumbs.db
 *.key
 *.pfx
 *.p12
+# Runtime state and private assistant memory/credentials are never sources.
+/agents/data/
+/agents/runtime/

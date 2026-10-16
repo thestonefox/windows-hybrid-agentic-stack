@@ -97,7 +97,8 @@ function Invoke-AgentStackTask {
         )]
         [string]$Kind,
 
-        [object[]]$Arguments = @()
+        [object[]]$Arguments = @(),
+        [switch]$StrictOutcome
     )
 
     $isLocal = $Kind -in @('localagent', 'localagentdo')
@@ -273,18 +274,19 @@ function Invoke-AgentStackTask {
                 Test-Path -LiteralPath $ttsScript -PathType Leaf
             )) {
                 Write-Error (
-                    'Chatterbox voice commands were not found. ' +
+                    'Speech commands were not found. ' +
                     'Install the TTS component first.'
                 )
                 return
             }
 
             try {
-                . $ttsScript -InstallPath $script:AgentStackInstallPath
+                if(Get-Command Get-StackSetupScript -ErrorAction Ignore) { . (Get-StackSetupScript $ttsScript) -InstallPath $script:AgentStackInstallPath }
+                else { . $ttsScript -InstallPath $script:AgentStackInstallPath }
             }
             catch {
                 Write-Error (
-                    'Could not load Chatterbox commands: ' +
+                    'Could not load speech commands: ' +
                     $_.Exception.Message
                 )
                 return
@@ -294,17 +296,10 @@ function Invoke-AgentStackTask {
         if ($null -eq (
             Get-Command tts-say -CommandType Function -ErrorAction SilentlyContinue
         )) {
-            Write-Error 'Chatterbox tts-say command is unavailable.'
+            Write-Error 'Speech tts-say command is unavailable.'
             return
         }
 
-        if ([string]::IsNullOrWhiteSpace($voiceName)) {
-            $voiceName = [string]$config.tts.defaultVoice
-        }
-
-        if ([string]::IsNullOrWhiteSpace($voiceName)) {
-            $voiceName = 'default'
-        }
     }
 
     $prompt = $promptParts -join ' '
@@ -400,11 +395,13 @@ function Invoke-AgentStackTask {
         }
 
         if ($exitCode -ne 0) {
+            if($StrictOutcome) { throw "OpenCode exited with code $exitCode." }
             Write-Warning "OpenCode exited with code $exitCode."
             return
         }
 
         if (-not $lastText) {
+            if($StrictOutcome) { throw 'No completed answer was received from OpenCode.' }
             if ($errorsFound.Count -eq 0) {
                 Write-Warning (
                     'No answer received. ' +
@@ -419,9 +416,11 @@ function Invoke-AgentStackTask {
             # Speak only the final answer, not tool logs or
             # intermediate OpenCode events.
             try {
-                tts-say -Text $lastText -Voice $voiceName
+                if ($voiceName) { tts-say -Text $lastText -Voice $voiceName }
+                else { tts-say -Text $lastText }
             }
             catch {
+                if($StrictOutcome) { throw ('The agent answered, but speech failed: '+$_.Exception.Message) }
                 Write-Warning (
                     'The agent answered, but speech failed: ' +
                     $_.Exception.Message

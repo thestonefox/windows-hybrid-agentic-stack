@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "opencode",
+  "name": "OpenCode",
+  "version": "1.0.0",
+  "executable": "opencode",
+  "documentation": "https://opencode.ai/docs/",
+  "entrypoints": {"adapter": "adapter.ps1"},
+  "capabilities": {
+    "ask": true,
+    "perform": true,
+    "chat": true,
+    "local": true,
+    "sessionResume": true,
+    "managedInstall": false
+  },
+  "files": ["manifest.json", "adapter.ps1"]
+}

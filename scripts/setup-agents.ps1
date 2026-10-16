@@ -18,6 +18,7 @@
 param(
     [switch]$Cloud,
     [switch]$Local,
+    [switch]$Yes,
 
     [Parameter(Mandatory = $true)]
     [string]$InstallPath,
@@ -423,7 +424,7 @@ try {
         }
         Write-Host "Checking Ollama source model: $LocalModel"
         if (-not (Test-OllamaModel -Name $LocalModel)) {
-            if (-not (Confirm-Action -Question "Download $LocalModel now?")) {
+            if (-not $Yes -and -not (Confirm-Action -Question "Download $LocalModel now?")) {
                 throw "Required Ollama model is missing: $LocalModel"
             }
             Invoke-AgentNativeCommand 'ollama' @('pull',$LocalModel) | ForEach-Object { Write-Host $_ }

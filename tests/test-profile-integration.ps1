@@ -36,14 +36,14 @@ function Assert-Runtime {
     Assert-True (@($ownership.Files.Path) -contains 'uninstall.ps1') 'Installed uninstaller is tracked'
     $commands = @(Get-Command agent,agentdo,localagent,localagentdo,
         tts-start,tts-stop,tts-status,tts-say,tts-voice-list,
-        tts-voice-add,tts-voice-remove,tts-voice-test,tts-engine-list,tts-engine-install,tts-engine-uninstall,tts-engine-default -CommandType Application)
-    Assert-True (@($commands | Select-Object -ExpandProperty Name -Unique).Count -eq 16) 'Native command entry points registered'
+        tts-voice-add,tts-voice-remove,tts-voice-test,tts-engine-list,tts-engine-install,tts-engine-uninstall,tts-engine-default,whas -CommandType Application)
+    Assert-True (@($commands | Select-Object -ExpandProperty Name -Unique).Count -eq 17) 'Native command entry points registered'
     Assert-True ([IO.File]::ReadAllText((Join-Path $bin 'install-root.txt')) -ceq $ExpectedRoot) 'Selected root registered locally'
-    if ($Count -eq 16) {
+    if ($Count -eq 17) {
         & (Join-Path $bin 'agent.exe') --help
         Assert-True ($LASTEXITCODE -eq 0) 'Real agent help works'
     }
-    & (Join-Path $bin 'tts-voice-list.exe')
+    & (Join-Path $bin 'tts-status.exe')
     Assert-True ($LASTEXITCODE -eq 0) 'Real TTS wrapper loads'
     Assert-True (-not (Test-Path -LiteralPath $PROFILE.CurrentUserCurrentHost)) 'No shared profile created'
 }
@@ -51,9 +51,9 @@ try {
     Write-Host "PowerShell: $($PSVersionTable.PSVersion)"
     Write-Host "Test files: $testRoot"
     $fixtureRepo = Join-Path $testRoot 'repository'
-    foreach ($relative in @('install.ps1', 'uninstall.ps1', 'scripts\script-invocation.ps1', 'scripts\installation-state.ps1', 'scripts\uninstall.ps1', 'scripts\install-agent-commands.ps1',
+    foreach ($relative in @('install.ps1', 'uninstall.ps1', 'config\AGENTS.md', 'scripts\setup-preview.ps1', 'scripts\script-invocation.ps1', 'scripts\installation-state.ps1', 'scripts\uninstall.ps1', 'scripts\install-agent-commands.ps1',
         'scripts\command-registration.ps1', 'scripts\command-host.cs', 'scripts\configuration.ps1', 'scripts\profile-loader.ps1', 'scripts\config.ps1', 'scripts\agent-commands.ps1',
-        'config\defaults.json', 'tts\tts.ps1', 'tts\tts_service.py', 'tts\strategy-management.ps1', 'tts\engine-management.ps1', 'tts\strategy.schema.json', 'tts\strategies\chatterbox-turbo\manifest.json', 'tts\strategies\chatterbox-turbo\install.ps1', 'tts\strategies\chatterbox-turbo\uninstall.ps1', 'tts\strategies\chatterbox-turbo\backend.py', 'tts\strategies\chatterbox-turbo\requirements.txt', 'tts\strategies\chatterbox-turbo\prepare_model.py')) {
+        'scripts\gui-host.cs','scripts\build-gui.ps1','scripts\build-setup.ps1','scripts\setup-host.cs','scripts\setup-runtime.cs','scripts\agent-strategies.ps1','scripts\whas.ps1','agents\strategies\opencode\manifest.json','agents\strategies\opencode\adapter.ps1','config\defaults.json', 'tts\tts.ps1', 'tts\tts_service.py', 'tts\strategy-management.ps1', 'tts\engine-management.ps1', 'tts\strategy.schema.json', 'tts\strategies\chatterbox-turbo\manifest.json', 'tts\strategies\chatterbox-turbo\install.ps1', 'tts\strategies\chatterbox-turbo\uninstall.ps1', 'tts\strategies\chatterbox-turbo\backend.py', 'tts\strategies\chatterbox-turbo\requirements.txt', 'tts\strategies\chatterbox-turbo\prepare_model.py')) {
         $destination = Join-Path $fixtureRepo $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $sourceRoot $relative) -Destination $destination
@@ -117,9 +117,9 @@ exit 0
 
     & $entryPoint -PersistCommandPath $false -Cloud -InstallPath $rootA
     Assert-True ($LASTEXITCODE -eq 0) 'Adding agents succeeds after voice-only'
-    Assert-Runtime $rootA 16
+    Assert-Runtime $rootA 17
     Assert-True (-not (Test-Path -LiteralPath $profilePath)) 'Adding agents creates no profile'
-    Write-Host 'PASS: Agent installer reuses the same registration; all 16 real commands load'
+    Write-Host 'PASS: Agent installer reuses the same registration; all 17 real commands load'
 
 
     $localFile = Join-Path $machineA '.windows-hybrid-agentic-stack\commands.json'
@@ -128,22 +128,28 @@ exit 0
     Assert-True ($LASTEXITCODE -eq 0) 'Repeat combined installation succeeds'
     Assert-True (-not (Test-Path -LiteralPath $profilePath)) 'Repeat profile bytes unchanged'
     Assert-True ((Get-FileHash -LiteralPath $localFile).Hash -ceq $localHash) 'Repeat local loader bytes unchanged'
-    Assert-Runtime $rootA 16
+    Assert-Runtime $rootA 17
     Write-Host 'PASS: Repeat combined installer leaves registration unchanged'
 
     $env:LOCALAPPDATA = $machineB
     $env:USERPROFILE = $machineB
     & $entryPoint -PersistCommandPath $false -Cloud -Voice -InstallPath $rootB
     Assert-True ($LASTEXITCODE -eq 0) 'Second simulated machine installer succeeds'
-    Assert-Runtime $rootB 16
+    Assert-Runtime $rootB 17
     Assert-True (-not (Test-Path -LiteralPath $profilePath)) 'Second machine preserves synced profile'
     $env:LOCALAPPDATA = $machineA
     $env:USERPROFILE = $machineA
-    Assert-Runtime $rootA 16
+    Assert-Runtime $rootA 17
     Write-Host 'PASS: Separate local registrations select each simulated PC root without a profile'
 
     # Exercise lazy voice loading without starting Python or producing audio.
     # HTTP readiness is mocked, and WAV generation stops at the request boundary.
+    # This installer fixture does not create a strategy runtime. Exercise its
+    # legacy fallback without the base-only empty engine registry.
+    $registryPath=Join-Path $rootA 'tts/engines.json'
+    $registryBytes=[IO.File]::ReadAllBytes($registryPath)
+    Remove-Item -LiteralPath $registryPath
+    try {
     & {
         . (Join-Path $rootA 'scripts\configuration.ps1')
         . (Join-Path $rootA 'scripts\agent-commands.ps1') -InstallPath $rootA
@@ -165,13 +171,14 @@ exit 0
         Assert-True ($script:TtsRoot -ceq $rootA) 'Lazy TTS loader receives custom root'
         Assert-True ($script:RequestedWav -ceq (Join-Path $rootA 'tts\last-spoken.wav')) 'Speech uses custom output path'
     }
+    } finally { [IO.File]::WriteAllBytes($registryPath,$registryBytes) }
     Write-Host 'PASS: Real agent -v lazily loads real TTS wrapper with explicit custom root'
 
     $env:LOCALAPPDATA = $machineA
     $env:USERPROFILE = $machineA
     & $entryPoint -PersistCommandPath $false -Cloud -Voice -InstallPath $rootB
     Assert-True ($LASTEXITCODE -eq 0) 'Changing selected root succeeds'
-    Assert-Runtime $rootB 16
+    Assert-Runtime $rootB 17
     Write-Host 'PASS: Installer updates machine-local registration when selected root changes'
 
     $parseErrors = @()

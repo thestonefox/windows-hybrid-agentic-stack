@@ -37,6 +37,7 @@ function Get-TtsConfiguration {
         AutoStart = $true
         Engine = 'chatterbox-turbo'
         DefaultVoice = 'default'
+        VoiceDefaults = @{}
     }
 
     foreach ($relativePath in @(
@@ -63,6 +64,7 @@ function Get-TtsConfiguration {
         }
 
         if ($null -ne $config.tts) {
+            if ($config.tts.voiceDefaults) { foreach($entry in $config.tts.voiceDefaults.PSObject.Properties) { $settings.VoiceDefaults[$entry.Name]=[string]$entry.Value } }
             if ($config.tts.engine) { $settings.Engine = [string]$config.tts.engine }
             if ($null -ne $config.tts.port) {
                 $settings.Port = [int]$config.tts.port
@@ -149,7 +151,7 @@ function Get-TtsStatusResponse {
     catch {
         return $null
     }
-    if ($script:TtsRuntime -and $response.installation_root -ine $script:TtsRoot) { throw 'Another service is using the configured speech port.' }
+    if (($script:TtsRuntime -or $response.installation_root) -and $response.installation_root -ine $script:TtsRoot) { throw 'Another service is using the configured speech port.' }
     if (-not $AnyEngine -and $script:TtsRuntime -and $response.engine -cne $script:TtsRuntime.engine) { throw 'The active speech service does not match the selected engine.' }
     return $response
 }
