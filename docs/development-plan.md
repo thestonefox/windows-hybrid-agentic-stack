@@ -58,6 +58,12 @@ source fingerprints, and the final rebuilt bytes passed another explicit
 Defender scan before replacing the bundled candidate. CI checks source freshness and blocks artifact upload unless an
 active Defender scan succeeds; the remote workflow has not been run or pushed.
 
+The committed Git source ZIP was extracted in the guest: all 126 entries passed
+the public-file check, the 595,968-byte GUI retained its exact scanned checksum,
+and source-fingerprint verification passed with Git-normalized line endings.
+The extracted source-secret scan found no leaks. The final guest was discarded;
+the GUI was never launched on the host and no host stack was installed.
+
 - Keep `whas.exe` exclusively as the CLI and `whas-gui.exe` as the graphical
   entry point. Do not combine terminal commands and normal graphical launch.
 - The graphical EXE must work before installation, with the reviewed setup
