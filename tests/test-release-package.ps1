@@ -41,7 +41,8 @@ try {
     $zip=Join-Path $output 'whas-windows-x64-v1.2.3.zip'
     $archive=[IO.Compression.ZipFile]::OpenRead($zip)
     try {
-        $entries=@($archive.Entries.FullName | ForEach-Object { $_.Replace('\','/') })
+        $entries=@($archive.Entries.FullName)
+        if (@($entries | Where-Object { $_.Contains('\') }).Count) { throw 'ZIP entries must use portable forward slashes' }
         if ($entries -contains 'docs/private.md' -or $entries -notcontains 'docs/installation.md' -or $entries -notcontains 'build.json') { throw 'Release asset allowlist failed' }
     }
     finally { $archive.Dispose() }

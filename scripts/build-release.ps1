@@ -55,7 +55,15 @@ $exe = Join-Path $OutputPath 'whas-setup.exe'
 Copy-Item -LiteralPath (Join-Path $bundle 'whas-setup.exe') -Destination $exe
 $zip = Join-Path $OutputPath ('whas-windows-x64-' + $Version + '.zip')
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-[IO.Compression.ZipFile]::CreateFromDirectory($bundle,$zip)
+Add-Type -AssemblyName System.IO.Compression
+$archive = [IO.Compression.ZipFile]::Open($zip, [IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($file in Get-ChildItem -LiteralPath $bundle -File -Recurse) {
+        $entry = $file.FullName.Substring($bundle.Length + 1).Replace('\','/')
+        $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $file.FullName, $entry)
+    }
+}
+finally { $archive.Dispose() }
 $sums = @($exe,$zip) | ForEach-Object { ((Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()) + '  ' + [IO.Path]::GetFileName($_) }
 [IO.File]::WriteAllLines((Join-Path $OutputPath 'SHA256SUMS.txt'), $sums, (New-Object Text.UTF8Encoding($false)))
 Write-Host "Unsigned release assets built from $commit in $OutputPath"
