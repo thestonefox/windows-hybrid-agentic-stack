@@ -16,10 +16,10 @@ Set-Location -LiteralPath 'PASTE YOUR EXTRACTED PROJECT FOLDER PATH HERE'
 ```
 
 ```powershell
-Get-Item .\install.ps1, .\scripts\check-prerequisites.ps1
+Get-Item .\install.ps1
 ```
 
-Both files should be listed. Source commands below run from this folder.
+The installer should be listed. Source commands below run from this folder.
 [Git cloning instructions](installation.md#clone-with-git-instead) are optional.
 If you already have the EXE, open its containing folder instead; see
 [standalone setup](#standalone-exe-route). A prebuilt release is not yet published.
@@ -29,14 +29,14 @@ If you already have the EXE, open its containing folder instead; see
 The read-only checker inspects all components by default:
 
 ```powershell
-.\scripts\check-prerequisites.ps1
+.\install.ps1 -Check
 ```
 
 If ordinary execution policy blocks it, use temporary permission for that
 process only:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-prerequisites.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Check
 ```
 
 Or, from the folder containing the [standalone EXE](#standalone-exe-route):

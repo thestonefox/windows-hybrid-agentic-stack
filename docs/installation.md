@@ -85,10 +85,10 @@ The **repository root** is the folder containing `install.ps1`, `scripts` and
 
 ```powershell
 Get-Location
-Get-Item .\install.ps1, .\scripts\check-prerequisites.ps1
+Get-Item .\install.ps1
 ```
 
-Both files should be listed. If either is missing, check the folder path; ZIP
+The installer should be listed. If it is missing, check the folder path; ZIP
 extraction can leave an extra enclosing folder. Commands beginning with `.\`
 refer to the current folder. Run source checks, builds and installation from
 this root, even while reading instructions in `docs`.
@@ -122,14 +122,14 @@ not required for this check.
 From the repository root, check all components (the default):
 
 ```powershell
-.\scripts\check-prerequisites.ps1
+.\install.ps1 -Check
 ```
 
 If ordinary execution policy blocks the source script, run it with permission
 limited to a child process:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-prerequisites.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Check
 ```
 
 This leaves saved policies and the parent terminal unchanged. Enforced
@@ -149,16 +149,27 @@ flags are supplied.
 Or check components independently:
 
 ```powershell
-.\scripts\check-prerequisites.ps1 -Cloud
+.\install.ps1 -Check -Cloud
 ```
 
 ```powershell
-.\scripts\check-prerequisites.ps1 -Local
+.\install.ps1 -Check -Local
 ```
 
 ```powershell
-.\scripts\check-prerequisites.ps1 -Voice
+.\install.ps1 -Check -Voice
 ```
+
+Check a particular speech engine, or comma-separated engines:
+
+```powershell
+.\install.ps1 -Check -Voice -TtsEngine piper-tts
+```
+
+`-Check` never prompts or installs anything. It exits with code `0` when the
+selected prerequisites pass, or `1` when prerequisites are missing or selection
+is invalid. The helper in `scripts/check-prerequisites.ps1` remains available
+for direct use.
 
 The checker uses the following result categories:
 

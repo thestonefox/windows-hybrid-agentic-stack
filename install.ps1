@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     Loads configuration, selects components, checks prerequisites
-    and installs cloud agents, local agents and Chatterbox Turbo.
+    and installs cloud agents, local agents and selected speech engines.
 
     Chatterbox automatically selects CPU or CUDA PyTorch.
     External prerequisites must already be installed.
@@ -25,10 +25,17 @@
 
 .EXAMPLE
     .\install.ps1 -Cloud -Local -Voice
+
+.EXAMPLE
+    .\install.ps1 -Check
+
+.EXAMPLE
+    .\install.ps1 -Check -Voice -TtsEngine piper-tts
 #>
 
 [CmdletBinding()]
 param(
+    [switch]$Check,
     [switch]$Cloud,
     [switch]$Local,
     [switch]$Voice,
@@ -166,6 +173,11 @@ try {
     }
 
     . (Get-StackSetupScript (Join-Path $repoRoot 'tts\strategy-management.ps1'))
+    if ($Check -and -not ($Cloud -or $Local -or $Voice)) {
+        $Cloud = $true
+        $Local = $true
+        $Voice = $true
+    }
     if ($TtsEngine -and -not $Voice) { throw '-TtsEngine requires -Voice.' }
     $requestedEngines = @()
     if ($TtsEngine) { $requestedEngines = @($TtsEngine.Split(',') | ForEach-Object { $_.Trim() }); $config.tts.engine = $requestedEngines[0] }
@@ -207,7 +219,7 @@ try {
         }
 
         $available = @(Get-TtsStrategies -Root $repoRoot)
-        if (-not $Yes -and -not $TtsEngine -and
+        if (-not $Check -and -not $Yes -and -not $TtsEngine -and
             -not (Test-Path -LiteralPath (Join-Path $repoRoot 'config/config.json'))) {
             $requestedEngines = @((Select-TtsEngine -Manifests @($available | ForEach-Object { $_.Manifest }) -Default $config.tts.engine).Split(','))
             $config.tts.engine = $requestedEngines[0]
@@ -248,7 +260,7 @@ try {
         GetUnresolvedProviderPathFromPSPath($InstallPath)
 
     Write-Host ''
-    Write-Host 'Installation plan'
+    Write-Host $(if ($Check) { 'Prerequisite check selection' } else { 'Installation plan' })
     Write-Host '-----------------'
     Write-Host "Directory:    $InstallPath"
     Write-Host "Cloud agents: $Cloud"
@@ -271,7 +283,7 @@ try {
 
     Write-Host ''
 
-    if (-not $Yes -and -not (Read-YesNo -Question 'Continue with installation?')) {
+    if (-not $Check -and -not $Yes -and -not (Read-YesNo -Question 'Continue with installation?')) {
         Write-Host 'Installation cancelled. No changes made.'
         exit 0
     }
@@ -307,6 +319,11 @@ try {
     Write-Host ''
     Write-Host 'Prerequisite checks completed.' `
         -ForegroundColor Green
+
+    if ($Check) {
+        Write-Host 'Check only. No changes made.'
+        exit 0
+    }
 
     . (Get-StackSetupScript (Join-Path $repoRoot 'scripts\installation-state.ps1'))
     $trackingArguments = @{ InstallPath = $InstallPath }
