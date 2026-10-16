@@ -65,6 +65,43 @@ claim that installation progress was complete was inaccurate.
   saved policies or unrelated files.
 - [ ] Recheck uninstall feedback, including the work immediately after approval.
 
+## 1a. Make speech status fast and bounded
+
+### Reported defect and investigation
+
+During the manual test, `tts-status` took a long time before printing default
+and active engine information, then appeared to wait again. Do not describe this
+as normal model loading: status should not load a model or start a service.
+
+Source inspection shows shared script loading before command output, an active
+engine HTTP probe, runtime/ownership validation after the engine lines, and a
+second HTTP probe in `Invoke-TtsStatusCore`. `Read-StackInstallationState`
+deserializes the full ownership record and validates every recorded file path;
+it can be called repeatedly during native helper loading and runtime selection.
+Large ownership records are a plausible contributor, not yet a measured cause.
+HTTP probes currently use a two-second timeout each; process checks can also
+contribute. Measure the stages before claiming the root cause is proven.
+
+- [ ] After the manual test finishes, time native startup, helper loading, state
+  parsing/validation, HTTP probes, runtime selection and process checks separately.
+- [ ] Reproduce with a realistic large ownership record as well as small fixtures.
+- [ ] Reuse one status result and validated state within an invocation where safe.
+  Avoid repeatedly traversing the full installation record for a simple status.
+- [ ] Retain ownership, runtime identity, path and process checks; do not remove
+  protections merely to improve timings. Define safe invalidation if using caches.
+- [ ] Bound the total status wait, not just individual HTTP calls. Distinguish
+  stopped, loading, responsive, unresponsive and conflicting service states.
+- [ ] Return promptly when the service is absent or unresponsive. Give visible
+  activity if a legitimate check exceeds the normal response interval.
+- [ ] Status must never load speech models, switch engines or start/stop services.
+- [ ] Test fresh native commands, stopped/loading/ready/unresponsive services,
+  stale PIDs, another installation on the port and explicit engine selection.
+- [ ] Measure before/after timings and establish a practical automated latency
+  bound with fixture services. Review other read-only commands for the same cost.
+
+Suggested additional commit:
+`fix(tts): bound status checks and avoid repeated ownership scans`
+
 ## 2. Establish the unified command interface
 
 ### Agreed direction
@@ -131,6 +168,29 @@ memory across conversations and background autonomy are separate capabilities.
   ordinary shared configuration and distributable build assets.
 - [ ] An open GUI must refresh settings changed by the CLI, or clearly identify
   changes that require restart. In-flight work must have defined behaviour.
+
+### Configuration sections and voice management
+
+Use separate GUI tabs with equivalent CLI configuration/menu access. Proposed
+sections are General, Agents, Models, Voice, and Sessions & Memory where supported.
+Final tab names can change without changing the shared configuration contract.
+
+- [ ] Provide a Voice tab for available/installed TTS strategies, explicit
+  install/uninstall actions, default engine and supported device selection.
+- [ ] List and preview an engine's voices; choose its default voice and expose
+  speech-output/playback preferences where supported.
+- [ ] Add/remove personal voice references only when the engine supports those
+  operations. Show why an unavailable operation is unsupported rather than
+  displaying controls that silently fail.
+- [ ] Validate reference requirements before import. F5 needs a WAV and matching
+  UTF-8 transcript; Chatterbox accepts supported WAV references; Piper's current
+  strategy does not support reference-sample voice cloning.
+- [ ] Explain reference conditioning accurately; do not call adding a recording
+  model training when no weights are trained.
+- [ ] Confirm removal of personal reference files, preserve unrelated samples,
+  and reflect changes made through existing voice commands in the GUI.
+- [ ] Reuse strategy capability/validation declarations and management operations,
+  rather than hard-coding engine-specific GUI behaviour wherever avoidable.
 
 ### Acceptance
 
