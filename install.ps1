@@ -283,7 +283,7 @@ try {
         Write-Host ''
         Write-Host 'Required prerequisites are missing.' `
             -ForegroundColor Red
-        Write-Host 'Follow the installation guide in README.md.'
+        Write-Host 'Follow the installation guide in docs/installation.md.'
         Write-Host 'Then rerun this installer.'
         exit 1
     }

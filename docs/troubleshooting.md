@@ -1,5 +1,13 @@
 # Troubleshooting
 
+## Windows blocks the unsigned EXE
+
+The setup EXE and installed command launchers are unsigned. SmartScreen may
+show an unrecognized-app warning; Smart App Control or organisation policy may
+block execution entirely. See [unsigned EXE verification and Windows warnings](installation.md#unsigned-exe-and-windows-warnings)
+for checksum checks and what the warning means. Do not disable Windows
+protections or change execution policy to make the EXE run.
+
 ## Piper TTS
 
 Select Piper with `install.ps1 -Voice -TtsEngine piper-tts` or standalone
@@ -28,6 +36,11 @@ and current limitations.
 
 Installed stack commands are native executables and require no PowerShell profile or execution-policy change. They host application command code internally, and isolated runtime tests pass under Restricted. Source installer and maintenance `.ps1` scripts still require a context permitted to run scripts; use the standalone setup EXE when policy blocks source scripts. Enforced restrictive organisation policy causes the command host to stop with an administrator-policy message.
 
+For an ordinary user/machine restriction on a personal PC, see
+[temporary permission for the source installer](installation.md#run-the-source-installer-with-temporary-permission).
+It describes a child-process-only option for reviewed source, without saving
+a policy change. It does not override Group Policy or Windows app controls.
+
 ### Missing stack commands
 
 The executable directory is `%USERPROFILE%\.windows-hybrid-agentic-stack\bin`. An earlier development version used AppData, where a packaged host could redirect files into its private cache. That caused `agent` to be missing in ordinary PowerShell even with the expected PATH entry. The current installer uses the user-directory location instead.
@@ -50,7 +63,7 @@ Install-StackCommandRegistration -InstallPath 'D:\AI\AgentStack'
 
 Use the actual installation directory. This only registers commands; it cannot supply missing runtime files or dependencies. Continue passing the correct installation path on future installer runs, or configure `installation.directory`.
 
-To remove local registration, stop TTS and run `Unregister-StackCommands` using the same helper. Installation files and models are retained. See [Remove command registration](../README.md#remove-command-registration-on-one-pc).
+To remove local registration, stop TTS and run `Unregister-StackCommands` using the same helper. Installation files and models are retained. See [Remove command registration](installation.md#remove-command-registration-on-one-pc).
 
 ### Errors from an older synced profile
 
