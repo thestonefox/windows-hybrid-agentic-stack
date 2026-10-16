@@ -135,15 +135,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Check
 This leaves saved policies and the parent terminal unchanged. Enforced
 organisation policies still apply. See [PowerShell execution policy](#powershell-execution-policy).
 
-With the standalone EXE, run this from its containing directory instead. If
-you do not have it yet, see [standalone executable setup](#standalone-executable-setup)
-for build instructions and [unsigned EXE warnings](#unsigned-exe-and-windows-warnings).
+GitHub's **Code > Download ZIP** contains source files and no setup EXE.
+Use the script above for that download. For a separately built EXE, see
+[standalone executable setup](#standalone-executable-setup), including its
+prerequisite-check command and [unsigned EXE warnings](#unsigned-exe-and-windows-warnings).
 
-```powershell
-.\whas-setup.exe --check
-```
-
-Both commands check cloud agents, local agents and speech when no component
+The checker inspects cloud agents, local agents and speech when no component
 flags are supplied.
 
 Or check components independently:
@@ -653,7 +650,7 @@ The installer still prompts before proceeding with installation.
 
 #### Standalone executable setup
 
-`whas-setup.exe` is a standalone command-line installer and uninstaller. The
+`whas-setup.exe` provides graphical and command-line installation and removal. The
 destination PC does not need the repository or build tools, but does need the
 external prerequisites for the selected components. A prebuilt release is not
 yet published; the current way to obtain the EXE is to build it from source.

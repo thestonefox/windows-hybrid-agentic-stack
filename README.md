@@ -13,8 +13,10 @@ profile or execution-policy changes.
 - [Quickstart](docs/quickstart.md) — get the project, check prerequisites and run your first commands.
 - [Installation guide](docs/installation.md) — detailed setup, configuration, usage and uninstall instructions.
 
-Install from source with `install.ps1`, or use the standalone `whas-setup.exe`.
-The EXE is currently built from source; a prebuilt release is not yet published.
+Cloning this repository or choosing **Code > Download ZIP** gives you the
+PowerShell installer, `install.ps1`. These source downloads contain no setup EXE.
+Ready-to-run release packages include `whas-setup.exe`, but a prebuilt release
+is not yet published; currently, build the EXE from source to use that route.
 It is unsigned, so Windows may display an unrecognized-app or unknown-publisher
 warning. See [EXE setup and verification](docs/installation.md#standalone-executable-setup).
 

@@ -21,8 +21,11 @@ Get-Item .\install.ps1
 
 The installer should be listed. Source commands below run from this folder.
 [Git cloning instructions](installation.md#clone-with-git-instead) are optional.
-If you already have the EXE, open its containing folder instead; see
-[standalone setup](#standalone-exe-route). A prebuilt release is not yet published.
+GitHub's **Code > Download ZIP** contains source files, including `install.ps1`;
+it does **not** contain `whas-setup.exe`. Follow the PowerShell commands below
+for that download. A ready-to-run release package includes the EXE, but a
+prebuilt release is not yet published. To build your own, see
+[standalone setup](#standalone-exe-route).
 
 ## 2. Check prerequisites and install what is missing
 
@@ -39,11 +42,7 @@ process only:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Check
 ```
 
-Or, from the folder containing the [standalone EXE](#standalone-exe-route):
-
-```powershell
-.\whas-setup.exe --check
-```
+For a separately built EXE, use the [standalone EXE route](#standalone-exe-route).
 
 Review required `FAIL` results and any `WARN` messages. Add component flags only
 for a subset; see [check options](installation.md#prerequisite-checks).
@@ -131,13 +130,18 @@ For multiple local models, see [model selection](cli.md#local-model-selection).
 
 ### Standalone EXE route
 
-If you need to build the EXE first, see [standalone build instructions](installation.md#standalone-executable-setup),
+The source download does not include this EXE. Build it first using
+[standalone build instructions](installation.md#standalone-executable-setup),
 including [temporary build permission](installation.md#powershell-execution-policy).
 Copy `dist\whas-setup.exe` to the destination PC; no source checkout is needed
 there. Keep the EXE outside the installation directory.
 
 The EXE is **unsigned**; read [Windows warnings and verification](installation.md#unsigned-exe-and-windows-warnings).
-From its containing folder, check prerequisites as above, then choose a setup route.
+From the folder containing the built EXE, check prerequisites:
+
+```powershell
+.\whas-setup.exe --check
+```
 
 Double-click `whas-setup.exe` to use the graphical component, model, engine and
 prerequisite screens. See the [graphical guide](gui.md). For console setup:
