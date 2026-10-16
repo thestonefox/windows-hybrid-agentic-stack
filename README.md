@@ -13,11 +13,10 @@ profile or execution-policy changes.
 - [Quickstart](docs/quickstart.md) — get the project, check prerequisites and run your first commands.
 - [Installation guide](docs/installation.md) — detailed setup, configuration, usage and uninstall instructions.
 
-Cloning this repository or choosing **Code > Download ZIP** gives you the
-PowerShell installer, `install.ps1`. These source downloads contain no setup EXE.
-Ready-to-run release packages include `whas-setup.exe`, but a prebuilt release
-is not yet published; currently, build the EXE from source to use that route.
-It is unsigned, so Windows may display an unrecognized-app or unknown-publisher
+Download the repository ZIP, extract it and double-click **`whas-gui.exe`**
+for guided setup. The same app provides usage, settings and removal afterward.
+For PowerShell setup, use the included `install.ps1` instead.
+The EXE is unsigned, so Windows may display an unrecognized-app or unknown-publisher
 warning. See [EXE setup and verification](docs/installation.md#standalone-executable-setup).
 
 ## Commands
@@ -34,7 +33,7 @@ Cloud commands inherit your OpenCode model selection by default. Add `-v` to an
 agent command, or `--voice` to `whas ask`/`perform`, to speak its response.
 The existing `agent`, `localagent`, `agentdo` and `localagentdo` commands remain
 available. Open `whas-gui.exe` in the installation folder for graphical use;
-opening `whas-setup.exe` without arguments starts graphical setup/uninstall.
+the same graphical application handles first-run setup and complete removal.
 
 ## Documentation
 

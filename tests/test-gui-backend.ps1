@@ -7,6 +7,32 @@ try {
     $library=Join-Path $fixture 'gui-library.dll'
     Add-Type -Path (Join-Path $repo 'scripts/gui-host.cs') -OutputAssembly $library -ReferencedAssemblies System.dll,System.Core.dll,System.Drawing.dll,System.Windows.Forms.dll,System.Web.Extensions.dll
     [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($library))|Out-Null
+    $stateRoot=Join-Path $fixture 'state'
+    [IO.Directory]::CreateDirectory((Join-Path $stateRoot 'config'))|Out-Null
+    if([WindowsHybridAgenticStack.WhasWindow]::IsConfigured($stateRoot)) { throw 'Fresh root was treated as configured' }
+    [IO.File]::WriteAllText((Join-Path $stateRoot '.whas-installation.json'),'{"Status":"Interrupted"}')
+    if([WindowsHybridAgenticStack.WhasWindow]::IsConfigured($stateRoot)) { throw 'Interrupted installation opened usage' }
+    [IO.File]::WriteAllText((Join-Path $stateRoot '.whas-installation.json'),'{"Status":"Installed"}')
+    if([WindowsHybridAgenticStack.WhasWindow]::IsConfigured($stateRoot)) { throw 'Missing shared files opened usage' }
+    [IO.File]::WriteAllText((Join-Path $stateRoot 'config/defaults.json'),'{}')
+    if(-not [WindowsHybridAgenticStack.WhasWindow]::IsConfigured($stateRoot)) { throw 'Installed root failed to open usage' }
+    [IO.File]::WriteAllText((Join-Path $stateRoot '.whas-installation.json'),'invalid')
+    if([WindowsHybridAgenticStack.WhasWindow]::IsConfigured($stateRoot)) { throw 'Malformed state opened usage' }
+    # Inspect/rebuild controls without showing or activating a desktop window.
+    $window=New-Object WindowsHybridAgenticStack.WhasWindow($true,'fixture.exe','[]',$stateRoot)
+    try {
+        $flags=[Reflection.BindingFlags]'NonPublic,Instance'
+        $tabs=$window.GetType().GetField('tabs',$flags).GetValue($window)
+        if($tabs.TabPages[0].Text -ne 'Features') { throw 'First-run page was not feature configuration' }
+        $window.GetType().GetField('setup',$flags).SetValue($window,$false)
+        $window.GetType().GetMethod('BuildPages',$flags).Invoke($window,@())|Out-Null
+        if($tabs.TabPages[0].Text -ne 'Ask & chat' -or @($tabs.TabPages|Where-Object Text -eq 'Remove WHAS').Count -ne 1) { throw 'Configured view lacks usage or same-window removal' }
+        $window.GetType().GetMethod('OpenSetup',$flags).Invoke($window,@())|Out-Null
+        if($tabs.SelectedTab.Text -ne 'Features') { throw 'Feature management launched outside the application' }
+        $window.GetType().GetField('setup',$flags).SetValue($window,$true)
+        $window.GetType().GetMethod('BuildPages',$flags).Invoke($window,@())|Out-Null
+        if($tabs.TabPages[0].Text -ne 'Features') { throw 'Removal did not return to first-run configuration' }
+    } finally { $window.Dispose() }
     $fake=Join-Path $fixture 'echo.exe'
     Add-Type -TypeDefinition @'
 using System; using System.Text; using System.IO;
@@ -39,9 +65,12 @@ public static class GuiLifecycleTest {
    process.Start(executable,new[]{"--hold",pidFile},delegate(string line,bool error){},delegate(int code){exit=code;done.Set();});
    try {
     if(!process.CanCancel) throw new Exception("Owned request cancellation unavailable");
-    for(int i=0;i<100 && !File.Exists(pidFile);i++) Thread.Sleep(100);
-    if(!File.Exists(pidFile)) throw new Exception("Owned child did not start");
-    int child=int.Parse(File.ReadAllText(pidFile));
+    int child=0;
+    for(int i=0;i<100 && child==0;i++) {
+     try { if(File.Exists(pidFile)) int.TryParse(File.ReadAllText(pidFile),out child); } catch(IOException) { }
+     if(child==0) Thread.Sleep(100);
+    }
+    if(child<=0) throw new Exception("Owned child did not publish its process ID");
     process.Cancel();
     if(!done.WaitOne(10000) || exit!=130 || process.Running) throw new Exception("Cancellation did not complete");
     try { var remaining=System.Diagnostics.Process.GetProcessById(child); if(!remaining.WaitForExit(5000)) throw new Exception("Cancellation left a child running"); remaining.Dispose(); } catch(ArgumentException) { }
@@ -56,6 +85,16 @@ public static class GuiLifecycleTest {
     try {
         if((Get-FileHash -LiteralPath $maintenance).Hash -cne (Get-FileHash -LiteralPath $fake).Hash -or (Split-Path -Parent $maintenance) -eq $fixture -or -not [WindowsHybridAgenticStack.GuiMaintenance]::IsTemporarySetup($maintenance) -or [WindowsHybridAgenticStack.GuiMaintenance]::IsTemporarySetup($fake)) { throw 'Maintenance copy did not preserve the executable outside the installation' }
     } finally { Remove-Item -LiteralPath $maintenance -Force; Remove-Item -LiteralPath (Split-Path -Parent $maintenance) }
+    $cleanupCopy=[WindowsHybridAgenticStack.GuiMaintenance]::CopySetup($fake)
+    $cleanupCode="[Reflection.Assembly]::Load([IO.File]::ReadAllBytes('"+$library.Replace("'","''")+"'))|Out-Null; [WindowsHybridAgenticStack.GuiMaintenance]::CleanupAfterExit('"+$cleanupCopy.Replace("'","''")+"')"
+    $cleanupStart=New-Object Diagnostics.ProcessStartInfo
+    $cleanupStart.FileName=Join-Path $PSHOME 'powershell.exe'
+    $cleanupStart.Arguments='-NoLogo -NoProfile -ExecutionPolicy Restricted -EncodedCommand '+[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cleanupCode))
+    $cleanupStart.UseShellExecute=$false; $cleanupStart.CreateNoWindow=$true
+    $cleanupProcess=[Diagnostics.Process]::Start($cleanupStart)
+    try { if(-not $cleanupProcess.WaitForExit(15000) -or $cleanupProcess.ExitCode) { throw 'Temporary GUI cleanup helper failed' } } finally { $cleanupProcess.Dispose() }
+    for($attempt=0;$attempt -lt 100 -and (Test-Path -LiteralPath (Split-Path -Parent $cleanupCopy));$attempt++){Start-Sleep -Milliseconds 100}
+    if(Test-Path -LiteralPath (Split-Path -Parent $cleanupCopy)) { throw 'Temporary GUI copy was not cleaned under Restricted policy' }
     $lockedRoot=Join-Path $fixture 'locked-installation'
     [IO.Directory]::CreateDirectory($lockedRoot)|Out-Null
     $lockedExe=Join-Path $lockedRoot 'whas-gui.exe'; Copy-Item -LiteralPath $fake -Destination $lockedExe

@@ -34,4 +34,4 @@ jobs:
           cd release-assets
           sha256sum --check SHA256SUMS.txt
           printf '%s\n' 'Unsigned Windows x64 setup. Windows may warn about an unknown publisher or block execution.' 'The ZIP includes installation guides and licence notices. Verify SHA256SUMS.txt before running setup.' > release-notes.txt
-          gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG" --notes-file release-notes.txt whas-setup.exe whas-windows-x64-*.zip SHA256SUMS.txt
+          gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG" --notes-file release-notes.txt whas-gui.exe whas-windows-x64-*.zip SHA256SUMS.txt

@@ -18,12 +18,12 @@ namespace WindowsHybridAgenticStack {
     public static class GuiMaintenance {
         public static bool IsTemporarySetup(string executable) {
             string directory=Path.GetDirectoryName(Path.GetFullPath(executable));
-            return String.Equals(Path.GetDirectoryName(directory).TrimEnd('\\'),Path.GetTempPath().TrimEnd('\\'),StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(Path.GetFileName(directory),"^whas-setup-ui-[a-f0-9]{32}$") && Path.GetFileName(executable)=="whas-setup.exe";
+            return String.Equals(Path.GetDirectoryName(directory).TrimEnd('\\'),Path.GetTempPath().TrimEnd('\\'),StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(Path.GetFileName(directory),"^whas-setup-ui-[a-f0-9]{32}$") && (Path.GetFileName(executable)=="whas-setup.exe" || Path.GetFileName(executable)=="whas-gui.exe");
         }
         public static string CopySetup(string executable) {
             string directory=Path.Combine(Path.GetTempPath(),"whas-setup-ui-"+Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
-            string target=Path.Combine(directory,"whas-setup.exe");
+            string target=Path.Combine(directory,Path.GetFileName(executable)=="whas-gui.exe"?"whas-gui.exe":"whas-setup.exe");
             File.Copy(executable,target); File.SetAttributes(target,FileAttributes.Normal); return target;
         }
         public static void CleanupAfterExit(string executable) {
@@ -32,7 +32,7 @@ namespace WindowsHybridAgenticStack {
             string literal=executable.Replace("'","''"); string folder=directory.Replace("'","''");
             string code="Wait-Process -Id "+Process.GetCurrentProcess().Id+" -ErrorAction SilentlyContinue; for($i=0;$i -lt 30;$i++){try{[IO.File]::Delete('"+literal+"');[IO.Directory]::Delete('"+folder+"');break}catch{Start-Sleep -Milliseconds 200}}";
             string shell=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","WindowsPowerShell","v1.0","powershell.exe");
-            Process.Start(new ProcessStartInfo(shell,"-NoLogo -NoProfile -NonInteractive -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(code))){UseShellExecute=false,CreateNoWindow=true});
+            Process.Start(new ProcessStartInfo(shell,"-NoLogo -NoProfile -NonInteractive -Command "+GuiProcess.Quote(code)){UseShellExecute=false,CreateNoWindow=true});
         }
         public static void CheckUnlockedGui(string root) {
             string prefix=Path.GetFullPath(root).TrimEnd('\\')+"\\";
@@ -152,7 +152,9 @@ namespace WindowsHybridAgenticStack {
     }
 
     public sealed class WhasWindow : Form {
-        private readonly bool setup;
+        private bool setup;
+        private readonly string catalog;
+        private int featureTab;
         private readonly string executable;
         private string root;
         private readonly TabControl tabs=new TabControl();
@@ -163,13 +165,13 @@ namespace WindowsHybridAgenticStack {
         private readonly JavaScriptSerializer json=new JavaScriptSerializer();
         private GuiProcess operation;
         private readonly List<Control> actions=new List<Control>();
-        private readonly TextBox destination=new TextBox();
-        private readonly CheckBox cloud=new CheckBox(), local=new CheckBox(), voice=new CheckBox();
-        private readonly CheckedListBox engines=new CheckedListBox(), models=new CheckedListBox();
-        private readonly ComboBox defaultEngine=new ComboBox(), defaultModel=new ComboBox();
+        private TextBox destination=new TextBox();
+        private CheckBox cloud=new CheckBox(), local=new CheckBox(), voice=new CheckBox();
+        private CheckedListBox engines=new CheckedListBox(), models=new CheckedListBox();
+        private ComboBox defaultEngine=new ComboBox(), defaultModel=new ComboBox();
         private ComboBox defaultLocation;
         private readonly List<string> engineIds=new List<string>();
-        private readonly CheckBox retainModels=new CheckBox();
+        private CheckBox retainModels=new CheckBox();
         private DataGridView checkGrid;
         private bool checkPassed;
         private bool rendering;
@@ -181,16 +183,16 @@ namespace WindowsHybridAgenticStack {
         private readonly Dictionary<string,Control> settings=new Dictionary<string,Control>();
         private ComboBox voiceEngine, voiceName;
         private Button voiceAdd, voiceRemove;
-        private readonly Label voiceSupport=new Label();
+        private Label voiceSupport=new Label();
         private readonly Dictionary<string,Dictionary<string,object>> voiceInventory=new Dictionary<string,Dictionary<string,object>>();
 
         public WhasWindow(bool isSetup,string path,string setupCatalog,string initialRoot=null) {
-            setup=isSetup; executable=path; root=initialRoot==null?ResolveRoot(path):Path.GetFullPath(initialRoot);
-            Text=setup ? "WHAS Setup" : "WHAS";
+            setup=isSetup; executable=path; catalog=setupCatalog; root=initialRoot==null?ResolveRoot(path):Path.GetFullPath(initialRoot);
+            Text="WHAS";
             Font=new Font("Segoe UI",10); AutoScaleMode=AutoScaleMode.Dpi;
             Size=new Size(980,800); MinimumSize=new Size(820,640); StartPosition=FormStartPosition.CenterScreen;
             BackColor=Color.FromArgb(246,248,251);
-            var heading=new Label {Text=setup ? "Windows Hybrid Agentic Stack — Setup" : "Windows Hybrid Agentic Stack", Dock=DockStyle.Top,Height=62,Padding=new Padding(22,18,0,0),Font=new Font("Segoe UI",16,FontStyle.Bold)};
+            var heading=new Label {Text="Windows Hybrid Agentic Stack", Dock=DockStyle.Top,Height=62,Padding=new Padding(22,18,0,0),Font=new Font("Segoe UI",16,FontStyle.Bold)};
             tabs.Dock=DockStyle.Fill; tabs.Padding=new Point(16,8);
             output.Multiline=true; output.ReadOnly=true; output.ScrollBars=ScrollBars.Both; output.WordWrap=false;
             output.Dock=DockStyle.Bottom; output.Height=170; output.Font=new Font("Consolas",9); output.BackColor=Color.White;
@@ -201,11 +203,33 @@ namespace WindowsHybridAgenticStack {
             cancel.Click+=delegate { if (operation != null) { try { operation.Cancel(); status.Text="Cancellation requested; changes already made may need cleanup."; } catch(Exception e) { Error(e); } } };
             bottom.Controls.Add(progress); bottom.Controls.Add(cancel);
             Controls.Add(tabs); Controls.Add(output); Controls.Add(status); Controls.Add(bottom); Controls.Add(heading);
-            if (setup) BuildSetup(setupCatalog); else BuildUsage();
+            BuildPages();
+            Shown+=delegate { if(!rendering && !setup) { try { ReloadSettings(); } catch(Exception e) { status.Text=e.Message; } } };
             FormClosing+=delegate(object sender,FormClosingEventArgs e) {
                 if (operation != null && operation.Running) { e.Cancel=true; MessageBox.Show(this,"An operation is running. Cancel it and wait for completion before closing.","Operation in progress"); }
             };
             FormClosed+=delegate { if (operation != null) operation.Dispose(); };
+        }
+        public static bool IsConfigured(string root) {
+            string record=Path.Combine(root,".whas-installation.json");
+            if(!File.Exists(record)) return false;
+            try { var state=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(record)); return state!=null && state.ContainsKey("Status") && Convert.ToString(state["Status"])=="Installed" && File.Exists(Path.Combine(root,"config","defaults.json")); }
+            catch(ArgumentException) { return false; } catch(IOException) { return false; }
+        }
+        private void BuildPages() {
+            tabs.SuspendLayout();
+            try {
+                foreach(TabPage page in tabs.TabPages.Cast<TabPage>().ToArray()) { tabs.TabPages.Remove(page); page.Dispose(); }
+                actions.Clear(); settings.Clear(); voiceInventory.Clear(); engineIds.Clear();
+                workspace=null; voiceAdd=null; voiceRemove=null; voiceSupport=new Label(); checkPassed=false;
+                destination=new TextBox(); cloud=new CheckBox(); local=new CheckBox(); voice=new CheckBox();
+                models=new CheckedListBox(); engines=new CheckedListBox(); defaultModel=new ComboBox(); defaultEngine=new ComboBox(); retainModels=new CheckBox();
+                if(!setup) BuildUsage();
+                featureTab=tabs.TabPages.Count;
+                BuildSetup(catalog??"[]");
+                tabs.SelectedIndex=0;
+                status.Text=setup?"Choose features to get started, or remove an incomplete installation.":"Ready";
+            } finally { tabs.ResumeLayout(); }
         }
         internal static string ResolveRoot(string path) {
             string adjacent=Path.GetDirectoryName(path);
@@ -268,16 +292,18 @@ namespace WindowsHybridAgenticStack {
         }
         private void Command(IEnumerable<string> args,Action<int,string> done) { Run(Cli(),args,done); }
         private void BuildSetup(string catalog) {
-            var select=Page("1. Choose");
-            TextLine(select,"Choose components, then select models and speech engines. Existing installations use the same ownership and cleanup rules.",44);
+            var select=Page("Features");
+            TextLine(select,"Add features to WHAS. This selection adds or repairs components; unticking does not delete existing features. Remove engines and runtimes in their management tabs, or remove all on the Remove WHAS tab.",82);
             foreach(var pair in new[]{Tuple.Create(cloud,"Cloud agents"),Tuple.Create(local,"Local agents (Ollama)"),Tuple.Create(voice,"Speech output")}) {
-                pair.Item1.Text=pair.Item2; pair.Item1.Width=500; pair.Item1.Checked=true; select.Controls.Add(pair.Item1);
+                pair.Item1.Text=pair.Item2; pair.Item1.Width=500; pair.Item1.Checked=setup; select.Controls.Add(pair.Item1);
             }
+            Button(select,"Select all features",delegate { cloud.Checked=local.Checked=voice.Checked=true; });
+            Button(select,"Select none (shared app only)",delegate { cloud.Checked=local.Checked=voice.Checked=false; });
             TextLine(select,"Installation directory",24); destination.Text=root; destination.Width=760; select.Controls.Add(destination);
             Button(select,"Choose folder…",delegate { using(var picker=new FolderBrowserDialog()) { picker.SelectedPath=destination.Text; if(picker.ShowDialog(this)==DialogResult.OK) destination.Text=picker.SelectedPath; } });
             defaultLocation=Choice(select,"Default request location",new[]{"automatic","cloud","local"});
-            Button(select,"Next: models and engines",delegate { tabs.SelectedIndex=1; });
-            var components=Page("2. Models & engines");
+            Button(select,"Next: models and engines",delegate { tabs.SelectedIndex=featureTab+1; });
+            var components=Page("Models & engines");
             TextLine(components,"Local models — select downloads, then choose a default. Existing models are reused. Requirements and download sizes vary by model and quantization.",48);
             models.Width=550; models.Height=78; models.CheckOnClick=true;
             models.Items.Add("qwen3:8b",true); models.Items.Add("qwen2.5:1.5b",false); components.Controls.Add(models);
@@ -293,32 +319,32 @@ namespace WindowsHybridAgenticStack {
             }
             components.Controls.Add(engines); defaultEngine.Width=400; defaultEngine.DropDownStyle=ComboBoxStyle.DropDownList; components.Controls.Add(defaultEngine);
             engines.ItemCheck+=delegate { BeginInvoke((Action)UpdateEngines); }; UpdateEngines();
-            Button(components,"Next: prerequisite checks",delegate { tabs.SelectedIndex=2; });
-            var checks=Page("3. Check");
+            Button(components,"Next: prerequisite checks",delegate { tabs.SelectedIndex=featureTab+2; });
+            var checks=Page("Prerequisites");
             TextLine(checks,"Checks are read-only. Install missing external prerequisites yourself using the links below, then select Check again. A passing check is required before installation.",62);
             checkGrid=new DataGridView {Width=840,Height=190,ReadOnly=true,AllowUserToAddRows=false,AllowUserToDeleteRows=false,RowHeadersVisible=false,AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill,BackgroundColor=Color.White};
             foreach(string title in new[]{"Component","Required","Status","Details"}) checkGrid.Columns.Add(title,title); checkGrid.Columns[3].FillWeight=300; checks.Controls.Add(checkGrid);
-            Button(checks,"Check again",delegate { var selection=Selection(); checkGrid.Rows.Clear(); checkedSelection=String.Join("\n",selection); Run(executable,new[]{"--check"}.Concat(selection),delegate(int code,string text) { checkPassed=code==0; if(checkPassed) status.Text="Prerequisites passed. Continue to Review & install."; }); });
+            Button(checks,"Check again",delegate { var selection=Selection(); checkGrid.Rows.Clear(); checkedSelection=String.Join("\n",selection); Run(executable,new[]{"--check"}.Concat(selection),delegate(int code,string text) { checkPassed=code==0; if(checkPassed) status.Text="Prerequisites passed. Continue to Apply features."; }); });
             Link(checks,"Python 3.11","https://www.python.org/downloads/release/python-3119/");
             Link(checks,"Visual C++ x64 runtime","https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist");
             Link(checks,"NVIDIA drivers (optional CUDA)","https://www.nvidia.com/Download/index.aspx");
             Link(checks,"OpenCode installation","https://opencode.ai/docs/"); Link(checks,"Ollama installation","https://ollama.com/download/windows");
-            var install=Page("4. Review & install");
+            var install=Page("Apply features");
             TextLine(install,"Review prints the exact backend plan without changes. Installation downloads the selected dependencies/models and registers both command-line and graphical interfaces.",64);
             Button(install,"Review selection",delegate { Run(executable,new[]{"--plan"}.Concat(Selection()),null); });
-            Button(install,"Install selected components",delegate {
+            Button(install,"Apply selected features",delegate {
                 var selection=Selection(); if(!checkPassed || checkedSelection!=String.Join("\n",selection)) throw new InvalidOperationException("Run prerequisite checks for the current selection first.");
                 if(MessageBox.Show(this,"Install the reviewed selection and its downloads?","Confirm installation",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes) return;
-                Run(executable,new[]{"--install","--yes"}.Concat(selection),delegate(int code,string text) { if(code==0) status.Text="Installed. Open WHAS from the installation folder. Existing terminals must refresh PATH or reopen."; });
+                Run(executable,new[]{"--install","--yes"}.Concat(selection),delegate(int code,string text) { if(code==0) { root=Path.GetFullPath(destination.Text); setup=false; BuildPages(); ReloadSettings(); } });
             });
-            var uninstall=Page("Uninstall");
-            TextLine(uninstall,"Use the installation directory on the Choose tab. Preview first: unchanged owned files and installer-created models are removed; personal voices, agent data, modified files and external prerequisites are preserved.",82);
+            var uninstall=Page("Remove WHAS");
+            TextLine(uninstall,"Use the installation directory on the Features tab. Preview first: unchanged owned files and installer-created models are removed; personal voices, agent data, modified files and external prerequisites are preserved.",82);
             retainModels.Text="Retain installer-created Ollama models"; retainModels.Width=600; uninstall.Controls.Add(retainModels);
             Button(uninstall,"Preview removal",delegate { Run(executable,Removal(false),null); });
             Button(uninstall,"Uninstall…",delegate {
                 GuiMaintenance.CheckUnlockedGui(destination.Text);
                 if(MessageBox.Show(this,"Remove this tracked installation? Personal/modified files are preserved. Review the preview before proceeding.","Confirm uninstall",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)!=DialogResult.Yes) return;
-                Run(executable,Removal(true),delegate(int code,string text) { if(code==0) status.Text="Uninstallation complete. Review the receipt; reopen existing terminals to refresh PATH."; });
+                Run(executable,Removal(true),delegate(int code,string text) { if(code==0) { root=Path.GetFullPath(destination.Text); setup=true; BuildPages(); status.Text="WHAS removed. Personal/modified files remain. Existing terminals must refresh PATH or reopen."; } });
             });
         }
         private void Link(FlowLayoutPanel page,string title,string uri) {
@@ -369,7 +395,7 @@ namespace WindowsHybridAgenticStack {
             TextLine(agents,"OpenCode supplies restricted questions, tool-enabled tasks and contextual sessions.",66);
             Button(agents,"List agent runtimes",delegate { Command(new[]{"agent","list"},null); });
             Button(agents,"List local models",delegate { Command(new[]{"model","list"},null); });
-            Button(agents,"Open setup / model selection",delegate { OpenSetup(); });
+            Button(agents,"Add features / model selection",delegate { OpenSetup(); });
             var memory=Page("Sessions & memory");
             TextLine(memory,"Chat resumes only an explicit session ID. A blank session starts fresh. One-shot ask/perform do not resume previous conversations. Sessions are isolated between local and cloud use.",100);
             TextLine(memory,"Personal agent data is preserved during uninstall. Manage native runtime memory through its documented interface. WHAS does not silently enable a gateway, schedule, memory upload or cross-runtime history sharing.",90);
@@ -379,14 +405,13 @@ namespace WindowsHybridAgenticStack {
             Button(memory,"Forget association…",delegate { if(MessageBox.Show(this,"Forget only this WHAS association? This does not delete native history or persistent memory.","Forget association",MessageBoxButtons.YesNo)!=DialogResult.Yes) return; Command(new[]{"session","forget",Convert.ToString(sessionRuntime.SelectedItem),forget.Text.Trim(),"--yes"},null); });
             Button(memory,"Open installation folder",delegate { Process.Start(new ProcessStartInfo(root){UseShellExecute=true}); });
             var maintenance=Page("Maintenance");
-            TextLine(maintenance,"Install, maintain or uninstall through the same setup application, regardless of whether this installation began with PowerShell or an EXE.",60);
-            Button(maintenance,"Open setup / uninstall",delegate { OpenSetup(); });
+            TextLine(maintenance,"Manage features or remove WHAS in this application, regardless of whether you started with PowerShell or the graphical download.",60);
+            Button(maintenance,"Manage features",delegate { OpenSetup(); });
+            Button(maintenance,"Remove WHAS…",delegate { tabs.SelectedTab=tabs.TabPages.Cast<TabPage>().Single(p=>p.Text=="Remove WHAS"); });
             Button(maintenance,"Open installation guide",delegate { string doc=Path.Combine(root,"docs","installation.md"); Process.Start(new ProcessStartInfo(File.Exists(doc)?doc:"https://github.com/thestonefox/windows-hybrid-agentic-stack"){UseShellExecute=true}); });
         }
         private void OpenSetup() {
-            string file=Path.Combine(root,"whas-setup.exe"); if(!File.Exists(file)) throw new FileNotFoundException("The graphical setup component is missing; repair the installation.");
-            Process.Start(new ProcessStartInfo(GuiMaintenance.CopySetup(file),"--gui --install-path "+GuiProcess.Quote(root)){UseShellExecute=false,CreateNoWindow=true});
-            Close();
+            tabs.SelectedIndex=featureTab;
         }
         private void RefreshRuntimes() {
             Command(new[]{"agent","list"},delegate(int code,string text) {
@@ -409,7 +434,6 @@ namespace WindowsHybridAgenticStack {
             var settingPicker=Choice(page,"Setting to save",settings.Keys.ToArray());
             Button(page,"Save selected setting",delegate { string name=Convert.ToString(settingPicker.SelectedItem); var control=settings[name]; string value=control is ComboBox ? Convert.ToString(((ComboBox)control).SelectedItem) : control.Text; Command(new[]{"configure","--set",name,value},null); });
             TextLine(page,"Save one setting at a time. Reload before editing after CLI changes. No component is installed by saving a default.",48);
-            Shown+=delegate { if(!rendering) { try { ReloadSettings(); } catch(Exception e) { status.Text=e.Message; } } };
         }
         private void ReloadSettings() {
             Command(new[]{"configure","--show"},delegate(int code,string text) {
@@ -475,14 +499,4 @@ namespace WindowsHybridAgenticStack {
         public void Render(string file) { rendering=true; CreateControl(); PerformLayout(); using(var bitmap=new Bitmap(Width,Height)) { DrawToBitmap(bitmap,new Rectangle(0,0,Width,Height)); bitmap.Save(file); } }
     }
 
-    public static class GuiHost {
-        [STAThread] public static int Main(string[] args) {
-            Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
-            string file=System.Reflection.Assembly.GetExecutingAssembly().Location;
-            using(var window=new WhasWindow(false,file,null)) {
-                if(args.Length==2 && args[0]=="--render") { window.Render(args[1]); return 0; }
-                Application.Run(window); return 0;
-            }
-        }
-    }
 }

@@ -8,8 +8,14 @@ configuration and alternatives in detail.
 
 Open the [repository](https://github.com/thestonefox/windows-hybrid-agentic-stack),
 select `main`, then **Code > Download ZIP**. In File Explorer, use **Extract All**
-and choose a location. Open the extracted folder containing `install.ps1` and
-copy its full path from the address bar. Replace the placeholder below:
+and choose a location.
+
+For graphical setup, open the extracted folder and double-click
+**`whas-gui.exe`**. It includes feature selection and prerequisite checks; see
+the [graphical route](#standalone-exe-route). You do not need to build it.
+
+For PowerShell setup, open the folder containing `install.ps1`, copy its full
+path from the address bar and replace the placeholder below:
 
 ```powershell
 Set-Location -LiteralPath 'PASTE YOUR EXTRACTED PROJECT FOLDER PATH HERE'
@@ -21,11 +27,8 @@ Get-Item .\install.ps1
 
 The installer should be listed. Source commands below run from this folder.
 [Git cloning instructions](installation.md#clone-with-git-instead) are optional.
-GitHub's **Code > Download ZIP** contains source files, including `install.ps1`;
-it does **not** contain `whas-setup.exe`. Follow the PowerShell commands below
-for that download. A ready-to-run release package includes the EXE, but a
-prebuilt release is not yet published. To build your own, see
-[standalone setup](#standalone-exe-route).
+The download includes both PowerShell sources and the built graphical EXE.
+Follow the commands below if you chose the PowerShell route.
 
 ## 2. Check prerequisites and install what is missing
 
@@ -130,29 +133,16 @@ For multiple local models, see [model selection](cli.md#local-model-selection).
 
 ### Standalone EXE route
 
-The source download does not include this EXE. Build it first using
-[standalone build instructions](installation.md#standalone-executable-setup),
-including [temporary build permission](installation.md#powershell-execution-policy).
-Copy `dist\whas-setup.exe` to the destination PC; no source checkout is needed
-there. Keep the EXE outside the installation directory.
+Use `whas-gui.exe` from the extracted repository ZIP. No build is required.
+You can also copy just this EXE to another PC; it embeds setup and does not
+need the source checkout there. Keep `whas-gui.build.json` if you want to
+compare its published checksum. See [verification](installation.md#unsigned-exe-and-windows-warnings).
 
 The EXE is **unsigned**; read [Windows warnings and verification](installation.md#unsigned-exe-and-windows-warnings).
-From the folder containing the built EXE, check prerequisites:
-
-```powershell
-.\whas-setup.exe --check
-```
-
-Double-click `whas-setup.exe` to use the graphical component, model, engine and
-prerequisite screens. See the [graphical guide](gui.md). For console setup:
-
-```powershell
-.\whas-setup.exe --install
-```
-
-With no component flags, EXE setup uses configured defaults (initially all
-components). See [component and engine options](installation.md#standalone-executable-setup)
-if you only want part of the stack.
+Double-click `whas-gui.exe`. On first run, choose **Features**, models/engines,
+run **Prerequisites**, then review and **Apply selected features**. Once
+configured, the same application opens usage and settings. See the
+[graphical guide](gui.md). Use `install.ps1` for console setup.
 
 ## 5. Try your installed components
 
@@ -199,19 +189,8 @@ Apply with confirmation, including unchanged installer-created Ollama models:
 Add `-RetainManagedModels` to keep those models. If execution policy blocks the
 script, see the [temporary uninstall permission commands](installation.md#if-execution-policy-blocks-the-uninstall-script).
 
-Or use the EXE from its containing folder. Preview:
-
-```powershell
-.\whas-setup.exe --uninstall
-```
-
-Apply:
-
-```powershell
-.\whas-setup.exe --uninstall --apply
-```
-
-Add `--retain-managed-models` to keep stack-created models. Choose one uninstall
+Or open `whas-gui.exe`, select **Remove WHAS**, preview removal, choose whether
+to retain installer-created models, then confirm removal. Choose one uninstall
 route. Personal voices, modified/unknown files, original models and separately
 installed prerequisites are preserved. Read the cleanup receipt.
 

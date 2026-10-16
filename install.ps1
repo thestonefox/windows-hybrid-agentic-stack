@@ -518,7 +518,7 @@ try {
     $reuseApps=$false
     if(Test-Path -LiteralPath $stampPath) {
         $valid=$true
-        foreach($name in @('.whas-app-build.json','whas-gui.exe','whas-setup.exe')) {
+        foreach($name in @('.whas-app-build.json','whas-gui.exe')) {
             $entry=@($trackingSession.State.Files | Where-Object { $_.Path -ceq $name })
             $file=Join-Path $InstallPath $name
             if($entry.Count -ne 1 -or -not (Test-Path -LiteralPath $file) -or (Get-StackFileSHA256 $file) -cne $entry[0].SHA256) { $valid=$false; break }
@@ -531,12 +531,10 @@ try {
     try {
         Invoke-StackSetupScript -Path (Join-Path $repoRoot 'scripts/build-gui.ps1') -Arguments @{OutputPath=(Join-Path $buildDirectory 'whas-gui.exe')}
         if($LASTEXITCODE -ne 0) { throw 'Graphical client build failed.' }
-        Invoke-StackSetupScript -Path (Join-Path $repoRoot 'scripts/build-setup.ps1') -Arguments @{OutputPath=(Join-Path $buildDirectory 'whas-setup.exe')}
-        if($LASTEXITCODE -ne 0) { throw 'Graphical maintenance build failed.' }
-        foreach($name in @('whas-gui.exe','whas-setup.exe')) { Copy-StackFile -Source (Join-Path $buildDirectory $name) -Destination (Join-Path $InstallPath $name) }
+        Copy-StackFile -Source (Join-Path $buildDirectory 'whas-gui.exe') -Destination (Join-Path $InstallPath 'whas-gui.exe')
         [IO.File]::WriteAllText($stampPath,(@{sourceSHA256=$fingerprint}|ConvertTo-Json),(New-Object Text.UTF8Encoding($false)))
     } finally {
-        foreach($name in @('whas-gui.exe','whas-setup.exe')) { $file=Join-Path $buildDirectory $name; if(Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force } }
+        foreach($name in @('whas-gui.exe')) { $file=Join-Path $buildDirectory $name; if(Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force } }
         if(-not @(Get-ChildItem -LiteralPath $buildDirectory -Force).Count) { Remove-Item -LiteralPath $buildDirectory }
     }
     } else { Write-Host 'Graphical applications unchanged; reusing verified builds.' }

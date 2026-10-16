@@ -72,6 +72,8 @@ try {
         [IO.Directory]::CreateDirectory((Split-Path -Parent $destination)) | Out-Null
         Copy-Item -LiteralPath (Join-Path $repo $relative) -Destination $destination
     }
+    # Native component orchestration must not depend on a real host Ollama API.
+    Add-Content -LiteralPath (Join-Path $source 'scripts\installation-state.ps1') -Value "`r`nfunction Get-StackOllamaModels { return @() }"
     [IO.File]::WriteAllText((Join-Path $source 'scripts\check-prerequisites.ps1'), @'
 param([switch]$Cloud,[switch]$Local,[switch]$Voice,[string]$StrategyManifestJson)
 Write-Host "CHECK Cloud=$Cloud Local=$Local Voice=$Voice POLICY=$(Get-ExecutionPolicy)"
@@ -102,6 +104,17 @@ exit 0
     $portableExe = Join-Path $portable 'whas-setup-preview.exe'
     & (Join-Path $source 'scripts\build-setup.ps1') -OutputPath $portableExe
     Assert-True (Test-Path -LiteralPath $portableExe) 'Prototype built'
+    $fingerprintBefore=(& (Join-Path $source 'scripts/build-setup.ps1') -Fingerprint -Force|Out-String).Trim()
+    $inputPath=Join-Path $source 'install.ps1'
+    $inputBytes=[IO.File]::ReadAllBytes($inputPath)
+    try {
+        $inputText=[Text.Encoding]::UTF8.GetString($inputBytes).Replace("`r`n","`n")
+        [IO.File]::WriteAllBytes($inputPath,[Text.Encoding]::UTF8.GetBytes($inputText))
+        $lf=(& (Join-Path $source 'scripts/build-setup.ps1') -Fingerprint -Force|Out-String).Trim()
+        [IO.File]::WriteAllBytes($inputPath,[Text.Encoding]::UTF8.GetBytes($inputText.Replace("`n","`r`n")))
+        $crlf=(& (Join-Path $source 'scripts/build-setup.ps1') -Fingerprint -Force|Out-String).Trim()
+        Assert-True ($lf -ceq $crlf -and $lf -ceq $fingerprintBefore) 'Source freshness accepts LF ZIPs and CRLF Windows clones'
+    } finally { [IO.File]::WriteAllBytes($inputPath,$inputBytes) }
     $rejected = $false
     try { & (Join-Path $source 'scripts\build-setup.ps1') -OutputPath $portableExe } catch { $rejected = $true }
     Assert-True $rejected 'Build refuses to replace existing output without Force'
@@ -158,7 +171,8 @@ exit 0
     Assert-True (Test-Path -LiteralPath (Join-Path $fakeUser '.windows-hybrid-agentic-stack\bin\agent.exe')) 'Native installation registers real executable launchers in isolated user folder'
     $hash = (Get-FileHash -LiteralPath $ownershipPath).Hash
     $start=New-Object Diagnostics.ProcessStartInfo
-    $start.FileName=Join-Path $target 'whas-setup.exe'; $start.Arguments='--uninstall --apply --yes'
+    Assert-True ((Test-Path -LiteralPath (Join-Path $target 'whas-gui.exe')) -and -not (Test-Path -LiteralPath (Join-Path $target 'whas-setup.exe'))) 'Single self-contained graphical application installed'
+    $start.FileName=Join-Path $target 'whas-gui.exe'; $start.Arguments='--uninstall --apply --yes'
     $start.UseShellExecute=$false; $start.CreateNoWindow=$true; $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
     $self=[Diagnostics.Process]::Start($start)
     try { $text=$self.StandardError.ReadToEnd();$self.WaitForExit();Assert-True ($self.ExitCode -eq 1 -and $text -like '*outside the installation*' -and (Get-FileHash -LiteralPath $ownershipPath).Hash -ceq $hash) 'Console self-uninstall refuses locked-image removal before making changes' } finally { $self.Dispose() }

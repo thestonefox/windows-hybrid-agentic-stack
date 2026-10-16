@@ -23,7 +23,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $repo 'scripts/agent-strategies.ps1') -Destination (Join-Path $source 'scripts/agent-strategies.ps1')
     Copy-Item -LiteralPath (Join-Path $repo 'scripts/installation-state.ps1') -Destination (Join-Path $source 'scripts/installation-state.ps1')
     Copy-Item -LiteralPath (Join-Path $repo 'tts/strategy-management.ps1') -Destination (Join-Path $source 'tts/strategy-management.ps1')
-    Write-Fixture 'scripts/build-setup.ps1' 'param($OutputPath); [IO.File]::WriteAllText($OutputPath, "fixture executable")'
+    Write-Fixture 'scripts/build-gui.ps1' 'param($OutputPath); [IO.File]::WriteAllText($OutputPath, "fixture executable")'
     Write-Fixture 'README.md' '# Fixture'
     Write-Fixture 'LICENSE' 'Fixture licence'
     Write-Fixture 'docs/installation.md' '# Public installation guide'
@@ -46,6 +46,7 @@ try {
         $entries=@($archive.Entries.FullName)
         if (@($entries | Where-Object { $_.Contains('\') }).Count) { throw 'ZIP entries must use portable forward slashes' }
         if ($entries -contains 'docs/private.md' -or $entries -notcontains 'docs/installation.md' -or $entries -notcontains 'build.json') { throw 'Release asset allowlist failed' }
+        if ($entries -notcontains 'whas-gui.exe' -or $entries -contains 'whas-setup.exe') { throw 'Release must contain the single graphical entry point' }
     }
     finally { $archive.Dispose() }
     foreach ($line in Get-Content -LiteralPath (Join-Path $output 'SHA256SUMS.txt')) {

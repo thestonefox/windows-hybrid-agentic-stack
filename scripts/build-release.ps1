@@ -31,7 +31,7 @@ foreach ($package in $packages) {
 [IO.Directory]::CreateDirectory($OutputPath) | Out-Null
 $bundle = Join-Path $OutputPath 'bundle'
 [IO.Directory]::CreateDirectory($bundle) | Out-Null
-& (Join-Path $PSScriptRoot 'build-setup.ps1') -OutputPath (Join-Path $bundle 'whas-setup.exe')
+& (Join-Path $PSScriptRoot 'build-gui.ps1') -OutputPath (Join-Path $bundle 'whas-gui.exe')
 foreach ($file in @('README.md','LICENSE')) { Copy-Item -LiteralPath (Join-Path $repo $file) -Destination (Join-Path $bundle $file) }
 [IO.Directory]::CreateDirectory((Join-Path $bundle 'docs')) | Out-Null
 foreach ($file in @($tracked | Where-Object { $_ -like 'docs/*.md' })) {
@@ -58,8 +58,8 @@ foreach ($package in $packages) {
 [IO.File]::WriteAllText((Join-Path $bundle 'THIRD-PARTY-NOTICES.txt'), $notices.ToString(), (New-Object Text.UTF8Encoding($false)))
 $metadata = [pscustomobject]@{version=$Version;commit=$commit;platform='windows-x64';signed=$false}
 [IO.File]::WriteAllText((Join-Path $bundle 'build.json'), ($metadata | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
-$exe = Join-Path $OutputPath 'whas-setup.exe'
-Copy-Item -LiteralPath (Join-Path $bundle 'whas-setup.exe') -Destination $exe
+$exe = Join-Path $OutputPath 'whas-gui.exe'
+Copy-Item -LiteralPath (Join-Path $bundle 'whas-gui.exe') -Destination $exe
 $zip = Join-Path $OutputPath ('whas-windows-x64-' + $Version + '.zip')
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type -AssemblyName System.IO.Compression

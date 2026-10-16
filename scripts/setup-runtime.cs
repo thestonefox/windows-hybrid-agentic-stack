@@ -82,7 +82,7 @@ namespace WindowsHybridAgenticStack {
                 foreach (var file in SetupPayload.Files) {
                     string destination = Path.Combine(root, file.Key.Replace('/', Path.DirectorySeparatorChar));
                     Directory.CreateDirectory(Path.GetDirectoryName(destination));
-                    File.WriteAllBytes(destination, Convert.FromBase64String(file.Value));
+                    File.WriteAllBytes(destination, SetupPayload.ReadBytes(file.Key));
                 }
                 if (configuration != null) File.WriteAllText(Path.Combine(root, "config", "config.json"), configuration, new System.Text.UTF8Encoding(false));
                 return Execute(Path.Combine(root, script), arguments, true).ExitCode;

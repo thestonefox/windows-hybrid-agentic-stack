@@ -6,6 +6,76 @@ Use the CLI, GUI and agent guides for commands available in this implementation.
 
 ## Work boundary and current status
 
+### Agreed graphical entry point revision
+
+Status: the revised GUI is bundled after eight focused guest suites, a ninth
+bundle-verification suite and a successful explicit host Defender scan. Do not
+treat earlier validation below as validation of this revision. A development
+self-contained GUI build was blocked
+by host Defender as `Trojan:Win32/Sabsik.FL.A!ml` before its launch completed.
+The detection has not been classified as a false positive. Further builds and
+product execution stayed in disposable background Sandboxes; no exclusions, quarantine
+restores or protection disabling are permitted. Its WinDefend service is
+inactive and could not be started, so guest functional tests cannot establish
+Defender compatibility. Independent scanner results must retain that limit.
+
+- [x] Pass focused guest regression suites for the new entry point and lifecycle.
+- [x] Obtain a successful explicit Defender scan of the revised build before
+  bundling it. The original detection's cause remains unconfirmed.
+- [x] Bundle the exact scanned GUI EXE with source downloads, with a source
+  fingerprint/checksum check to prevent stale binaries.
+- [ ] Exercise the new Defender release gate on a supported build machine.
+
+Revision validation: Windows PowerShell 5.1 guest runs passed GUI routing,
+same-window rebuilding/navigation, temporary-copy cleanup under Restricted,
+native setup/removal component cycles, prerequisite checks, tracked uninstall,
+multiple-model ownership, model selection, unified CLI and release packaging.
+These are eight suites across serial runs, with external dependencies mocked.
+Ten implementation/test file hashes matched the host working tree. The source
+secret scanner reported no leaks. No new product binary was executed on the
+host after the detection. With explicit user authorization, a third guest's
+unexecuted build was copied to a temporary host folder for an active Defender
+file scan. The scan returned zero with no threats, no detection records for
+that file and an unchanged hash; real-time protection remained enabled and
+signatures were `1.461.53.0`. Those exact bytes are bundled at the repository
+root with public hashes. No exclusions or quarantine restores were used.
+
+The first guest's full Microsoft Safety Scanner run was incomplete: resource
+exhaustion required discarding that guest. Do not report a clean malware scan.
+The second, smaller guest completed the functional suites offline. Its disabled
+WinDefend service rejected enabling with access denied, including in SYSTEM
+context. Those guests were discarded after testing. The subsequent authorized
+host scan is separate evidence and does not establish why the original build
+was detected. Manual graphical acceptance is still outstanding. No host security exclusions or policy/profile
+changes were made. The source fixture now mocks its Ollama inventory instead
+of depending on a live host server, and the child-PID test retries a brief
+file-sharing race.
+
+The new bundle-verification suite rejects modified, stale and missing files
+without compiling or executing the GUI. It also passed against the actual
+bundled EXE. A follow-up native setup run passed after adding canonical LF/CRLF
+source fingerprints, and the final rebuilt bytes passed another explicit
+Defender scan before replacing the bundled candidate. CI checks source freshness and blocks artifact upload unless an
+active Defender scan succeeds; the remote workflow has not been run or pushed.
+
+- Keep `whas.exe` exclusively as the CLI and `whas-gui.exe` as the graphical
+  entry point. Do not combine terminal commands and normal graphical launch.
+- The graphical EXE must work before installation, with the reviewed setup
+  payload embedded. A source ZIP must include the current built graphical EXE.
+- First launch opens feature configuration and prerequisite checks. A complete
+  installation opens usage/settings; interrupted state opens recovery/setup.
+- Show feature setup, model/engine choices and complete removal in the same
+  application. Run the graphical image outside its managed installation so it
+  can update/remove owned files without locking its own executable.
+- Keep existing per-engine/per-runtime removal controls and preserve personal
+  data. Adding features must not silently remove unchecked existing components.
+- Retain legacy console setup for compatibility/developers, without requiring
+  it as a second graphical download or installed application.
+- Validate fresh/configured/interrupted launch, embedded backend operations,
+  screen rebuilding, cleanup and ZIP contents without desktop automation.
+- Image/video generation and local/cloud shortcuts remain future discussion;
+  no media providers or dependencies are included in this change.
+
 - [x] Wait for the user to confirm their installation, testing and uninstallation
   are complete before changing installation or runtime code or running installs.
 - Documentation of this plan can proceed during that wait.

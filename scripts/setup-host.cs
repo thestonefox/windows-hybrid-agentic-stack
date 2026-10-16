@@ -6,6 +6,32 @@ using System.Management.Automation;
 using System.Management.Automation.Runspaces;
 
 namespace WindowsHybridAgenticStack {
+    public static class GuiBootstrap {
+        [STAThread] public static int Main(string[] args) {
+            // Backend actions use redirected streams; normal launch stays a GUI.
+            if(args.Length>0 && args[0]!="--gui" && args[0]!="--render") return SetupHost.Main(args);
+            try {
+                string executable=System.Reflection.Assembly.GetExecutingAssembly().Location;
+                bool render=args.Length==2 && args[0]=="--render";
+                if(!render && args.Length!=0 && !(args.Length==1 && args[0]=="--gui") && !(args.Length==3 && args[0]=="--gui" && args[1]=="--install-path")) throw new ArgumentException("Invalid graphical launch arguments.");
+                string root=args.Length==3?System.IO.Path.GetFullPath(args[2]):WhasWindow.ResolveRoot(executable);
+                if(!render && !GuiMaintenance.IsTemporarySetup(executable)) {
+                    string copy=GuiMaintenance.CopySetup(executable);
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(copy,"--gui --install-path "+GuiProcess.Quote(root)){UseShellExecute=false,CreateNoWindow=true});
+                    return 0;
+                }
+                System.Windows.Forms.Application.EnableVisualStyles();
+                System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
+                try { using(var window=new WhasWindow(!WhasWindow.IsConfigured(root),executable,SetupPayload.StrategyCatalog,root)) {
+                    if(render) window.Render(args[1]); else System.Windows.Forms.Application.Run(window);
+                } } finally { if(!render) GuiMaintenance.CleanupAfterExit(executable); }
+                return 0;
+            } catch(Exception error) {
+                System.Windows.Forms.MessageBox.Show(error.Message,"WHAS",System.Windows.Forms.MessageBoxButtons.OK,System.Windows.Forms.MessageBoxIcon.Error);
+                return 1;
+            }
+        }
+    }
     public static class SetupHost {
         private static void Help() {
             Console.WriteLine("Windows Hybrid Agentic Stack setup");

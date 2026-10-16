@@ -7,7 +7,7 @@
     credentials, profiles or environment values are embedded in the executable.
 #>
 [CmdletBinding()]
-param([string]$OutputPath, [switch]$Force, [switch]$Fingerprint)
+param([string]$OutputPath, [switch]$Force, [switch]$Fingerprint, [switch]$Graphical)
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -ne 5 -or -not [Environment]::Is64BitProcess) {
     throw 'Build using 64-bit Windows PowerShell 5.1.'
@@ -47,22 +47,36 @@ foreach ($package in $packages) {
     foreach ($file in $package.Files) { $assets += "tts/strategies/$($package.Manifest.id)/$file" }
 }
 if ($Fingerprint) {
-    $inputLines = @($assets | Select-Object -Unique | Sort-Object | ForEach-Object { $_.Replace('\','/') + ':' + (Get-FileHash -LiteralPath (Join-Path $repo $_) -Algorithm SHA256).Hash })
+    # Git ZIPs use LF while Windows clones may use CRLF. Canonicalise UTF-8
+    # text for freshness checks; binary assets retain their exact byte hashes.
+    $utf8=New-Object Text.UTF8Encoding($false,$true)
+    $inputLines = @($assets | Select-Object -Unique | Sort-Object | ForEach-Object {
+        $bytes=[IO.File]::ReadAllBytes((Join-Path $repo $_))
+        try {
+            $text=$utf8.GetString($bytes)
+            if($text.IndexOf([char]0) -lt 0) { $bytes=$utf8.GetBytes($text.Replace("`r`n","`n")) }
+        } catch [Text.DecoderFallbackException] { }
+        $assetSha=[Security.Cryptography.SHA256]::Create()
+        try { $assetHash=([BitConverter]::ToString($assetSha.ComputeHash($bytes))).Replace('-','') }
+        finally { $assetSha.Dispose() }
+        $_.Replace('\','/') + ':' + $assetHash
+    })
     $sha=[Security.Cryptography.SHA256]::Create()
     try { ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($inputLines -join "`n"))))).Replace('-','') }
     finally { $sha.Dispose() }
     return
 }
-foreach ($relative in $assets | Select-Object -Unique) {
-    $encoded = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $repo $relative)))
-    $null = $payload.AppendLine(('{"'+$relative.Replace('\','/')+'","'+$encoded+'"},'))
+$resourceAssets = @($assets | Select-Object -Unique)
+for ($index=0; $index -lt $resourceAssets.Count; $index++) {
+    $relative=$resourceAssets[$index]
+    $null = $payload.AppendLine(('{"'+$relative.Replace('\','/')+'","whas-asset-'+$index+'"},'))
 }
-$null = $payload.AppendLine('}; internal static string ReadText(string name) { return Encoding.UTF8.GetString(Convert.FromBase64String(Files[name])).TrimStart(new char[] { (char)0xfeff }); }')
+$null = $payload.AppendLine('}; internal static byte[] ResourceBytes(string resource) { using(var stream=typeof(SetupPayload).Assembly.GetManifestResourceStream(resource)) { if(stream==null) throw new InvalidOperationException("Missing application resource: "+resource); using(var bytes=new System.IO.MemoryStream()) { stream.CopyTo(bytes); return bytes.ToArray(); } } }')
+$null = $payload.AppendLine('internal static byte[] ReadBytes(string name) { return ResourceBytes(Files[name]); } internal static string ReadText(string name) { return Encoding.UTF8.GetString(ReadBytes(name)).TrimStart(new char[] { (char)0xfeff }); }')
 foreach ($name in $properties.Keys) {
     $null = $payload.AppendLine(('internal static string {0} {{ get {{ return ReadText("{1}"); }} }}' -f $name,$properties[$name].Replace('\','/')))
 }
-$catalogEncoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($catalog))
-$null = $payload.AppendLine(('internal static string StrategyCatalog { get { return Encoding.UTF8.GetString(Convert.FromBase64String("' + $catalogEncoded + '")); } }'))
+$null = $payload.AppendLine('internal static string StrategyCatalog { get { return Encoding.UTF8.GetString(ResourceBytes("whas-strategy-catalog")); } }')
 $null = $payload.AppendLine('} }')
 $build = Join-Path ([IO.Path]::GetTempPath()) ('whas-setup-build-' + [guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($build) | Out-Null
@@ -74,8 +88,17 @@ try {
     [IO.File]::WriteAllText($generated, $payload.ToString(), (New-Object Text.UTF8Encoding($false)))
     $parameters.GenerateExecutable = $true
     $parameters.OutputAssembly = $compiled
-    $parameters.CompilerOptions = '/platform:x64 /main:WindowsHybridAgenticStack.SetupHost'
+    $parameters.CompilerOptions = if($Graphical) { '/target:winexe /platform:x64 /main:WindowsHybridAgenticStack.GuiBootstrap' } else { '/platform:x64 /main:WindowsHybridAgenticStack.SetupHost' }
     $parameters.TempFiles = New-Object CodeDom.Compiler.TempFileCollection($build, $false)
+    # Store original file bytes as ordinary .NET resources, not encoded C# text.
+    for ($index=0; $index -lt $resourceAssets.Count; $index++) {
+        $resource=Join-Path $build "whas-asset-$index"
+        Copy-Item -LiteralPath (Join-Path $repo $resourceAssets[$index]) -Destination $resource
+        $null=$parameters.EmbeddedResources.Add($resource)
+    }
+    $catalogResource=Join-Path $build 'whas-strategy-catalog'
+    [IO.File]::WriteAllText($catalogResource,$catalog,(New-Object Text.UTF8Encoding($false)))
+    $null=$parameters.EmbeddedResources.Add($catalogResource)
     $null = $parameters.ReferencedAssemblies.Add('System.dll')
     $null = $parameters.ReferencedAssemblies.Add('System.Core.dll')
     foreach ($assembly in @('System.Drawing.dll','System.Windows.Forms.dll','System.Web.Extensions.dll')) { $null = $parameters.ReferencedAssemblies.Add($assembly) }
@@ -91,7 +114,7 @@ try {
 finally {
     if ($null -ne $compiler) { $compiler.Dispose() }
     $parameters.TempFiles.Delete()
-    foreach ($path in @($generated,$compiled)) {
+    foreach ($path in @($generated,$compiled) + @($parameters.EmbeddedResources)) {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
     }
     if (@(Get-ChildItem -LiteralPath $build -Force).Count -eq 0) { Remove-Item -LiteralPath $build }

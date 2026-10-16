@@ -40,7 +40,7 @@ a normal window rather than **Run as administrator**. The scripts and build
 target 64-bit Windows PowerShell 5.1, the version supplied with Windows.
 
 Choose one way to get the source below. Git is optional. You need the source
-to run `install.ps1` or build `whas-setup.exe`; a destination PC receiving an
+to run `install.ps1` or build `whas-gui.exe`; a destination PC receiving an
 already-built EXE does not need Git or a source checkout.
 
 #### Download a ZIP (no Git required)
@@ -103,11 +103,11 @@ directory. In PowerShell, move into that folder, for example:
 
 ```powershell
 Set-Location -LiteralPath "$HOME\Downloads"
-Get-Item .\whas-setup.exe
+Get-Item .\whas-gui.exe
 ```
 
-Use the actual containing folder if different. Then continue with the EXE
-prerequisite check below. If you need to build it first, follow
+Use the actual containing folder if different. Double-click a reviewed build
+and use its **Prerequisites** screen. For developer build instructions, follow
 [standalone executable setup](#standalone-executable-setup). Review the
 [unsigned EXE guidance](#unsigned-exe-and-windows-warnings) before running it.
 A prebuilt project release is not yet published.
@@ -135,10 +135,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Check
 This leaves saved policies and the parent terminal unchanged. Enforced
 organisation policies still apply. See [PowerShell execution policy](#powershell-execution-policy).
 
-GitHub's **Code > Download ZIP** contains source files and no setup EXE.
-Use the script above for that download. For a separately built EXE, see
-[standalone executable setup](#standalone-executable-setup), including its
-prerequisite-check command and [unsigned EXE warnings](#unsigned-exe-and-windows-warnings).
+The repository ZIP includes both `install.ps1` and `whas-gui.exe`. For the
+graphical route, double-click the EXE and use its **Prerequisites** screen;
+see [standalone executable setup](#standalone-executable-setup) and
+[unsigned EXE warnings](#unsigned-exe-and-windows-warnings).
 
 The checker inspects cloud agents, local agents and speech when no component
 flags are supplied.
@@ -553,7 +553,7 @@ The same process-only approach can build the standalone EXE using 64-bit
 Windows PowerShell 5.1:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-setup.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-gui.ps1
 ```
 
 Once built, the EXE can install under an ordinary `Restricted` policy without
@@ -580,11 +580,8 @@ Chatterbox Turbo, Piper TTS and F5-TTS are bundled strategies. TTS packages are 
 
 ```powershell
 .\install.ps1 -Voice -TtsEngine chatterbox-turbo
-# Standalone: whas-setup.exe --install --voice --tts-engine chatterbox-turbo
 .\install.ps1 -Voice -TtsEngine piper-tts
-# Standalone: whas-setup.exe --install --voice --tts-engine piper-tts
 .\install.ps1 -Voice -TtsEngine f5-tts
-# Standalone: whas-setup.exe --install --voice --tts-engine f5-tts
 ```
 
 Chatterbox remains the default and supports CPU/CUDA and reference-WAV voice cloning. Piper is a lighter CPU-only option using a pre-trained English voice; it does not install PyTorch or support voice cloning. F5 supports CPU/CUDA and reference voices with a WAV plus an exact transcript; its pretrained weights are CC-BY-NC-4.0 (noncommercial use only). All three require Python 3.11 x64 and the Visual C++ runtime. Interactive setup offers the engine choice. Multiple engines may be installed; only one runs at a time. Select comma-separated engine IDs during setup, with the first as default. See [engine management](tts-strategies.md#manage-installed-engines) for adding, selecting and removing individual engines.
@@ -650,55 +647,35 @@ The installer still prompts before proceeding with installation.
 
 #### Standalone executable setup
 
-`whas-setup.exe` provides graphical and command-line installation and removal. The
-destination PC does not need the repository or build tools, but does need the
-external prerequisites for the selected components. A prebuilt release is not
-yet published; the current way to obtain the EXE is to build it from source.
-The build does not sign the EXE.
+`whas-gui.exe` is the graphical entry point for first-run configuration,
+everyday use, settings and removal. Its setup payload is embedded; no separate
+setup EXE, source checkout or build tools are needed on the destination PC.
+External prerequisites are still required for the selected features.
 
-Build with 64-bit Windows PowerShell 5.1 in a context permitted to run the build script:
+The repository includes the built `whas-gui.exe` at its root, so cloning or
+**Code > Download ZIP** provides it alongside the PowerShell scripts. No build
+is required: extract the ZIP and double-click the EXE. The adjacent
+`whas-gui.build.json` records its source fingerprint and SHA-256 checksum.
 
-```powershell
-.\scripts\build-setup.ps1
-```
-
-This uses the Windows compiler and creates `dist\whas-setup.exe`. No .NET SDK is required. Existing output is preserved unless `-Force` is supplied. The generated `dist` directory is ignored by Git. Copy the EXE to the destination PC and keep it outside the installation directory for later uninstall.
-
-The following examples run from the repository root after building. If you
-copied the EXE elsewhere, use `.\whas-setup.exe` from its containing directory
-instead of `.\dist\whas-setup.exe`.
-
-Show the available options:
+For developer builds, use 64-bit Windows PowerShell 5.1:
 
 ```powershell
-.\dist\whas-setup.exe --help
+.\scripts\build-gui.ps1
 ```
 
-Preview installation with the configured component defaults:
+This produces `dist\whas-gui.exe` using the Windows compiler; no .NET SDK is
+required. Existing output is preserved. Copy a reviewed build to the destination
+PC and double-click it. The application opens feature configuration before
+installation and usage/settings after a complete installation. See the
+[graphical application guide](gui.md) for prerequisite checks, adding features,
+engine/runtime removal and complete removal in the same window.
 
-```powershell
-.\dist\whas-setup.exe --plan
-```
-
-Check prerequisites:
-
-```powershell
-.\dist\whas-setup.exe --check
-```
-
-Install:
-
-```powershell
-.\dist\whas-setup.exe --install
-```
-
-Explicit component flags select only those components. Without component flags, plan/check/install use the bundled defaults (all three enabled). Installation asks for confirmation; `--yes` accepts that confirmation. Missing local source models still require download confirmation. `--config 'C:\path\settings.json'` reads JSON overrides, and `--install-path 'D:\AI\AgentStack'` selects the destination. Prerequisites must already be installed; setup does not install OpenCode, Ollama or Python itself.
-
-The EXE embeds application scripts, agent instructions, the speech service and `config/defaults.json`. User configuration and credentials are not packaged. Help, preview and prerequisite checks run from memory. Install/uninstall extract the compiled assets to a unique temporary directory, host the bundled code, then remove only those known assets and empty temporary directories. Loose scripts beside the EXE are ignored. Profiles are not loaded or changed, and saved execution policies are not changed. Restrictive enforced organization policy stops setup.
-
-For removal, follow the separate [Uninstallation](#uninstallation) process
-below. `--no-path` leaves saved user PATH unchanged; if you use it, keep that
-option consistent across installation and uninstall.
+The application embeds only declared application files and defaults as ordinary
+.NET resources. User configuration and credentials are not packaged. It does
+not load PowerShell profiles or change saved execution policies. Enforced
+organisation policy still applies. Use the PowerShell scripts above for
+terminal installation; the legacy developer `build-setup.ps1` console build
+remains available for compatibility but is not required by the GUI.
 
 #### Unsigned EXE and Windows warnings
 
@@ -714,12 +691,17 @@ calculate the downloaded EXE's hash and compare it with the value published
 for that exact version:
 
 ```powershell
-Get-FileHash -LiteralPath .\whas-setup.exe -Algorithm SHA256
+Get-FileHash -LiteralPath .\whas-gui.exe -Algorithm SHA256
 ```
 
 A matching checksum confirms the bytes match the published value; it is not a
 publisher signature or a guarantee of safety. Do not run a file whose checksum
-differs. Prebuilt release assets and checksums are not yet published.
+differs. For the repository's bundled EXE, compare against `executableSHA256`
+in `whas-gui.build.json`. A versioned GitHub Release is not yet published.
+
+An antivirus malware detection is different from an unsigned-publisher or
+SmartScreen reputation warning. Do not restore a quarantined build, add an
+antivirus exclusion or disable protection to run it; stop and report the finding.
 
 If you trust and have verified the file, SmartScreen may offer **More info**
 then **Run anyway**. That choice is not available under every policy. Smart
@@ -781,7 +763,7 @@ Each PC has one active root. Selecting another `-InstallPath` switches local reg
 ### Finish installation and check commands
 
 Both source and EXE installations include the unified `whas` command,
-`whas-gui.exe` and graphical maintenance through `whas-setup.exe` in the
+`whas-gui.exe` for usage, configuration and graphical removal in the
 installation folder. See [graphical workflows](gui.md) and
 [shared CLI settings](cli.md). Opening setup without arguments shows its GUI;
 explicit `--install`, `--check`, `--plan` and `--uninstall` retain console use.
@@ -883,42 +865,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\uninstall.ps1 -Apply -
 These commands leave saved execution policies unchanged. Enforced organisation
 policies still apply; see [execution-policy guidance](#powershell-execution-policy).
 
-### Uninstall with the standalone EXE
+### Uninstall with the graphical application
 
-Open PowerShell in the directory containing the setup EXE you kept outside the
-installation. Preview:
+Open `whas-gui.exe` and choose **Remove WHAS**, or navigate there through
+**Maintenance**. Preview removal, choose whether to retain installer-created
+Ollama models, then confirm removal. This uses the same ownership checks,
+strategy hooks and retention rules as the source uninstaller.
 
-```powershell
-.\whas-setup.exe --uninstall
-```
-
-Apply with confirmation, including eligible installer-created models:
-
-```powershell
-.\whas-setup.exe --uninstall --apply
-```
-
-To keep installer-created models, preview that choice:
-
-```powershell
-.\whas-setup.exe --uninstall --retain-managed-models
-```
-
-Then apply it:
-
-```powershell
-.\whas-setup.exe --uninstall --apply --retain-managed-models
-```
-
-The legacy `--remove-managed-models` option is still accepted, but removal is
-now the default. Do not combine removal and retention flags.
-
-The EXE resolves the active local registration. Use
-`--install-path 'D:\AI\AgentStack'` for a custom destination, replacing the example
-with your actual installation path. Add `--yes` to accept confirmation without
-prompting. If you are running from the source root with a locally built EXE,
-use `.\dist\whas-setup.exe` instead. No temporary PowerShell execution permission
-is needed for the EXE; Windows application controls still apply.
+Normal graphical launch uses a temporary copy outside the installation, so its
+installed executable can be removed safely. Close other installed WHAS windows
+first. The application returns to first-run configuration after removal.
 
 ### What cleanup removes and preserves
 
