@@ -314,7 +314,7 @@ function Invoke-StackUninstall {
         $directoryCount = 0
         foreach ($relative in $directories) {
             $directory = Resolve-StackOwnedPath $current.Root $relative
-            if ((Test-Path -LiteralPath $directory -PathType Container) -and @(Get-ChildItem -LiteralPath $directory -Force).Count -eq 0) { Remove-Item -LiteralPath $directory -ErrorAction Stop }
+            if ((Test-Path -LiteralPath $directory -PathType Container) -and @(Get-ChildItem -LiteralPath $directory -Force).Count -eq 0) { Remove-Item -LiteralPath $directory -Force -ErrorAction Stop }
             $directoryCount++
             if ($directoryProgress.Timer.ElapsedMilliseconds - $directoryProgress.LastUpdate -ge 2000) {
                 Write-StackOperationProgress $directoryProgress -Completed $directoryCount -Total $directories.Count

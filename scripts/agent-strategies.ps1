@@ -187,7 +187,7 @@ function Invoke-WhasAgentManagement {
             $runtime=Join-Path $root $prefix
             if (Test-Path -LiteralPath $runtime) {
                 $null=Get-StackInstallationTree $runtime
-                foreach ($directory in @(Get-ChildItem -LiteralPath $runtime -Directory -Recurse | Sort-Object { $_.FullName.Length } -Descending)+@((Get-Item -LiteralPath $runtime))) {
+                foreach ($directory in @(Get-ChildItem -LiteralPath $runtime -Directory -Force -Recurse | Sort-Object { $_.FullName.Length } -Descending)+@((Get-Item -LiteralPath $runtime))) {
                     if (-not @(Get-ChildItem -LiteralPath $directory.FullName -Force).Count) { Remove-Item -LiteralPath $directory.FullName -Force }
                 }
             }

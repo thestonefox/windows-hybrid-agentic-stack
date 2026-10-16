@@ -78,6 +78,9 @@ try {
     Write-Host 'PASS: Long-file progress and independent SHA256 parity'
 
     $session = New-Fixture "fresh A's [stack]"
+    $hidden=Join-Path $session.Root 'owned-hidden-directory'
+    [IO.Directory]::CreateDirectory($hidden)|Out-Null
+    [IO.File]::SetAttributes($hidden,([IO.File]::GetAttributes($hidden) -bor [IO.FileAttributes]::Hidden))
     Install-StackCommandRegistration -InstallPath $session.Root -PersistPath $false
     Complete-StackInstallationTracking $session $true
     $manifest = Join-Path $session.Root '.whas-installation.json'
