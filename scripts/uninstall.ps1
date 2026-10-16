@@ -3,9 +3,12 @@
 
 function Get-StackUninstallPlan {
     [CmdletBinding()]
-    param([Parameter(Mandatory=$true)][string]$InstallPath, [switch]$RemoveManagedModels)
+    param([Parameter(Mandatory=$true)][string]$InstallPath, [switch]$RemoveManagedModels,
+        [switch]$ShowProgress)
     $root = Assert-StackInstallationRoot -Root $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallPath)
-    $tree = Get-StackInstallationTree -Root $root
+    $scanProgress = New-StackOperationProgress 'Scanning installation' -Enabled:$ShowProgress
+    $tree = Get-StackInstallationTree -Root $root -Progress $scanProgress
+    Write-StackOperationProgress $scanProgress -Completed $tree.Files.Count -Total $tree.Files.Count -Force
     $state = Read-StackInstallationState -Root $root
     $plan = [pscustomobject]@{
         Root = $root; State = $state
@@ -36,12 +39,16 @@ function Get-StackUninstallPlan {
         if ($hash -cne $entry.SHA256) { throw "Original-file backup failed verification: $($entry.Path)" }
         $original[$entry.Path] = $entry
     }
+    $verifyProgress = New-StackOperationProgress 'Verifying installation ownership' -Enabled:$ShowProgress
+    $verifiedCount = 0
     foreach ($relative in $tree.Files) {
+        Write-StackOperationProgress $verifyProgress -Completed $verifiedCount -Total $tree.Files.Count
+        $verifiedCount++
         if ($relative -eq '.whas-installation.json') { continue }
         $path = Resolve-StackOwnedPath $root $relative
         $generated = Test-StackGeneratedFile $relative $state
         if ($original.ContainsKey($relative)) {
-            $hash = Get-StackFileSHA256 $path
+            $hash = Get-StackFileSHA256 $path -Progress $verifyProgress
             if ($hash -ceq $original[$relative].SHA256) { $plan.KeepFiles.Add($relative) }
             elseif ($owned.ContainsKey($relative) -and $hash -ceq $owned[$relative].SHA256) {
                 $plan.RestoreFiles.Add([pscustomobject]@{ Path = $relative; SHA256 = $hash; Original = $original[$relative] })
@@ -50,7 +57,7 @@ function Get-StackUninstallPlan {
         }
         elseif ($generated -or $owned.ContainsKey($relative)) {
             # Generated files are rehashed after verified speech shutdown before deletion.
-            $hash = Get-StackFileSHA256 $path -AllowConcurrentWrite:$generated
+            $hash = Get-StackFileSHA256 $path -AllowConcurrentWrite:$generated -Progress $verifyProgress
             if ($generated -or $hash -ceq $owned[$relative].SHA256) {
                 $plan.DeleteFiles.Add([pscustomobject]@{ Path = $relative; SHA256 = $hash })
                 if ($generated) {
@@ -61,6 +68,8 @@ function Get-StackUninstallPlan {
         }
         else { $plan.KeepFiles.Add($relative) }
     }
+    Write-StackOperationProgress $verifyProgress -Completed $tree.Files.Count -Total $tree.Files.Count -Force
+    if ($ShowProgress) { Write-Host 'Checking command registration and managed-model ownership...' }
     $registration = [IO.Path]::GetFullPath($state.RegistrationDirectory).TrimEnd('\')
     $expectedRegistration = Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack'
     if ($registration -ine $expectedRegistration) { throw 'Registration ownership points outside this user''s command directory.' }
@@ -98,6 +107,10 @@ function Get-StackUninstallPlan {
                     if ($hash -cne $entry.SHA256) { throw 'Previous-registration backup failed verification.' }
                 }
                 $plan.RestorePreviousRegistration = $exists
+                if ($exists -and $previousRoot -ine $root -and (Test-Path -LiteralPath (Join-Path $previousRoot '.whas-installation.json'))) {
+                    $previousState = Read-StackInstallationState $previousRoot
+                    $otherModels += @($previousState.Models.Name)
+                }
             }
             $path = Get-StackRawUserPath
             $expectedPath = if ($state.OriginalUserPath.Value.Length -eq 0) { $bin } else { $state.OriginalUserPath.Value + ';' + $bin }
@@ -117,7 +130,7 @@ function Get-StackUninstallPlan {
     foreach ($model in $state.Models) {
         if ($model.Name -notmatch '^whas-[a-z0-9-]+:latest$' -or $model.Digest -notmatch '^(sha256:)?[a-f0-9]{64}$') { throw 'Invalid managed-model ownership record.' }
         if ($RemoveManagedModels -and $model.Created -and $otherModels -notcontains $model.Name) {
-            # One inventory for all model checks, and no model request in the default preview.
+            # One read-only inventory for all eligible managed-model checks.
             if ($null -eq (Get-Variable inventory -Scope Local -ErrorAction Ignore)) { $inventory = @(Get-StackOllamaModels) }
             $current = @($inventory | Where-Object name -eq $model.Name)
             if ($current.Count -eq 1 -and $current[0].digest -ceq $model.Digest) { $plan.RemoveModels += $model }
@@ -190,25 +203,31 @@ function Invoke-StackUninstall {
     $receiptRoot = [IO.Path]::GetFullPath($ReceiptDirectory).TrimEnd('\')
     if ($receiptRoot -ieq $Plan.Root -or $receiptRoot.StartsWith($Plan.Root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Keep uninstall receipts outside the installation.' }
     if (-not $PSCmdlet.ShouldProcess($Plan.Root, ('Uninstall tracked stack files; remove managed models: ' + $Plan.RemoveManagedModels))) { return }
-    $current = Get-StackUninstallPlan -InstallPath $Plan.Root -RemoveManagedModels:$Plan.RemoveManagedModels
+    Write-Host 'Revalidating the cleanup plan after confirmation...'
+    $current = Get-StackUninstallPlan -InstallPath $Plan.Root -RemoveManagedModels:$Plan.RemoveManagedModels -ShowProgress
     $receipt = [ordered]@{ StartedAtUtc = [DateTime]::UtcNow.ToString('o'); InstallationId = $current.State.InstallationId;
         InstallPath = $current.Root; DeletedFiles = [Collections.Generic.List[string]]::new(); RestoredFiles = @(); RemovedModels = @(); KeptFiles = $current.KeepFiles;
         TtsStrategies = @(); KeptModels = $current.KeepModels; PreviousRegistrationRestored = $false; Completed = $false }
     New-Item -ItemType Directory -Path $receiptRoot -Force -ErrorAction Stop | Out-Null
     $receiptPath = Join-Path $receiptRoot ('uninstall-' + [guid]::NewGuid().ToString('N') + '.json')
     try {
+        Write-Host 'Stopping the installation speech service, if running...'
         Stop-StackOwnedSpeech -Root $current.Root
         # Logs may change while the service shuts down. Rebuild the plan after stopping it.
-        $current = Get-StackUninstallPlan -InstallPath $Plan.Root -RemoveManagedModels:$Plan.RemoveManagedModels
+        Write-Host 'Rechecking files after speech shutdown...'
+        $current = Get-StackUninstallPlan -InstallPath $Plan.Root -RemoveManagedModels:$Plan.RemoveManagedModels -ShowProgress
         $receipt.KeptFiles = $current.KeepFiles
         $receipt.KeptModels = $current.KeepModels
         foreach ($hook in $current.TtsHooks) {
+            Write-Host "Running TTS cleanup: $($hook.Id)..."
             Invoke-TtsVerifiedHook -Path $hook.Path -SHA256 $hook.SHA256 -Arguments @{Context=$hook.Context}
             $receipt.TtsStrategies += [pscustomobject]@{Id=$hook.Id; HookCompleted=$true}
         }
         # Hooks are trusted code. Revalidate file ownership after they return.
-        $current = Get-StackUninstallPlan -InstallPath $Plan.Root -RemoveManagedModels:$Plan.RemoveManagedModels
+        Write-Host 'Rechecking ownership after strategy cleanup...'
+        $current = Get-StackUninstallPlan -InstallPath $Plan.Root -RemoveManagedModels:$Plan.RemoveManagedModels -ShowProgress
         foreach ($model in $current.RemoveModels) {
+            Write-Host "Removing verified managed model: $($model.Name)..."
             $verified = @(Get-StackOllamaModels | Where-Object { $_.name -ceq $model.Name -and $_.digest -ceq $model.Digest })
             if ($verified.Count -ne 1) { throw 'Managed model changed since preview; files retained.' }
             $body = @{ model = $model.Name }
@@ -217,6 +236,7 @@ function Invoke-StackUninstall {
             $receipt.RemovedModels += $model.Name
         }
         if ($current.UnregisterCommands) {
+            Write-Host 'Removing command registration...'
             if ((Get-StackFileSHA256 (Join-Path $current.State.RegistrationDirectory 'commands.json')) -cne $current.RegistrationSHA256) { throw 'Command registration changed during uninstall; retained for review.' }
             $preservePreviousPath = $current.RestorePreviousRegistration -and $current.State.PreviousRegistration.HadPathEntry
             Unregister-StackCommands -RegistrationDirectory $current.State.RegistrationDirectory -PersistPath ($PersistPath -and -not $preservePreviousPath)
@@ -243,23 +263,36 @@ function Invoke-StackUninstall {
             if ($current.State.RegistrationBinExisted -and -not (Test-Path -LiteralPath $regBin)) { New-Item -ItemType Directory -Path $regBin -Force | Out-Null }
             if ((Test-Path -LiteralPath $current.State.RegistrationDirectory) -and @(Get-ChildItem -LiteralPath $current.State.RegistrationDirectory -Force).Count -eq 0 -and -not $current.State.RegistrationRootExisted) { Remove-Item -LiteralPath $current.State.RegistrationDirectory }
         }
+        $fileProgress = New-StackOperationProgress 'Restoring original files' -Enabled
         foreach ($entry in $current.RestoreFiles) {
             $path = Resolve-StackOwnedPath $current.Root $entry.Path
-            if ((Get-StackFileSHA256 $path) -cne $entry.SHA256) { throw "File changed during uninstall: $path" }
+            if ((Get-StackFileSHA256 $path -Progress $fileProgress) -cne $entry.SHA256) { throw "File changed during uninstall: $path" }
             [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($entry.Original.Base64))
             $receipt.RestoredFiles += $entry.Path
+            Write-StackOperationProgress $fileProgress -Completed $receipt.RestoredFiles.Count -Total $current.RestoreFiles.Count
         }
+        Write-StackOperationProgress $fileProgress -Completed $receipt.RestoredFiles.Count -Total $current.RestoreFiles.Count -Force
+        $fileProgress = New-StackOperationProgress 'Removing tracked files' -Enabled
         foreach ($entry in $current.DeleteFiles) {
+            Write-StackOperationProgress $fileProgress -Completed $receipt.DeletedFiles.Count -Total $current.DeleteFiles.Count
             $path = Resolve-StackOwnedPath $current.Root $entry.Path
-            if ((Get-StackFileSHA256 $path) -cne $entry.SHA256) { throw "File changed during uninstall: $path" }
+            if ((Get-StackFileSHA256 $path -Progress $fileProgress) -cne $entry.SHA256) { throw "File changed during uninstall: $path" }
             Remove-Item -LiteralPath $path -Force -ErrorAction Stop
             $receipt.DeletedFiles.Add($entry.Path)
         }
-        foreach ($relative in @(@($current.State.Directories) + @($current.GeneratedDirectories) | Sort-Object -Unique | Sort-Object Length -Descending)) {
+        Write-StackOperationProgress $fileProgress -Completed $receipt.DeletedFiles.Count -Total $current.DeleteFiles.Count -Force
+        Write-Host "Preserving $($current.KeepFiles.Count) files. Removing empty directories..."
+        $directories = @(@($current.State.Directories) + @($current.GeneratedDirectories) | Sort-Object -Unique | Sort-Object Length -Descending)
+        $directoryProgress = New-StackOperationProgress 'Checking empty directories' -Enabled -Unit 'directories'
+        $directoryCount = 0
+        foreach ($relative in $directories) {
             $directory = Resolve-StackOwnedPath $current.Root $relative
             if ((Test-Path -LiteralPath $directory -PathType Container) -and @(Get-ChildItem -LiteralPath $directory -Force).Count -eq 0) { Remove-Item -LiteralPath $directory -ErrorAction Stop }
+            $directoryCount++
+            Write-StackOperationProgress $directoryProgress -Completed $directoryCount -Total $directories.Count
         }
-        $left = Get-StackInstallationTree -Root $current.Root
+        Write-StackOperationProgress $directoryProgress -Completed $directoryCount -Total $directories.Count -Force
+        $left = Get-StackInstallationTree -Root $current.Root -Progress (New-StackOperationProgress 'Checking remaining files' -Enabled)
         if ((Get-StackFileSHA256 (Join-Path $current.Root '.whas-installation.json')) -cne $current.ManifestSHA256) { throw 'Ownership record changed during uninstall; preserved for review.' }
         if (@($left.Files | Where-Object { $_ -ne '.whas-installation.json' }).Count -eq 0 -and $left.Directories.Count -eq 0 -and -not $current.State.RootExisted) {
             Remove-Item -LiteralPath (Join-Path $current.Root '.whas-installation.json') -Force -ErrorAction Stop
@@ -275,4 +308,5 @@ function Invoke-StackUninstall {
         Write-Host "Uninstall receipt: $receiptPath"
     }
     Write-Host 'Uninstall completed. Preserved files and models are listed in the receipt.'
+    Write-Host 'Refresh PATH in your original terminal, or close and reopen the terminal application.'
 }

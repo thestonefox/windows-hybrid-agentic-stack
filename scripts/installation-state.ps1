@@ -1,6 +1,30 @@
 #Requires -Version 5.1
 # Shared ownership tracking. Loading this file performs no installation or cleanup.
 
+function New-StackOperationProgress {
+    param([string]$Activity, [switch]$Enabled, [string]$Unit = 'files')
+    if (-not $Enabled) { return $null }
+    $progress = [pscustomobject]@{
+        Activity = $Activity; Timer = [Diagnostics.Stopwatch]::StartNew()
+        LastUpdate = -2000L; Completed = 0L; Total = -1L; Unit = $Unit
+    }
+    Write-StackOperationProgress $progress -Force
+    return $progress
+}
+
+function Write-StackOperationProgress {
+    param($Progress, [long]$Completed = -1, [long]$Total = -1,
+        [string]$Detail, [switch]$Force)
+    if ($null -eq $Progress) { return }
+    if ($Completed -ge 0) { $Progress.Completed = $Completed }
+    if ($Total -ge 0) { $Progress.Total = $Total }
+    $elapsed = $Progress.Timer.ElapsedMilliseconds
+    if (-not $Force -and $elapsed - $Progress.LastUpdate -lt 2000) { return }
+    $Progress.LastUpdate = $elapsed
+    $count = if ($Progress.Total -ge 0) { "$($Progress.Completed)/$($Progress.Total) $($Progress.Unit)" } else { "$($Progress.Completed) $($Progress.Unit) inspected" }
+    Write-Host ("{0}: {1}; {2:N0}s elapsed. {3}" -f $Progress.Activity, $count, ($elapsed / 1000), $Detail).TrimEnd()
+}
+
 function Resolve-StackOwnedPath {
     param([string]$Root, [string]$Relative)
     if ([string]::IsNullOrWhiteSpace($Relative) -or [IO.Path]::IsPathRooted($Relative) -or
@@ -39,7 +63,7 @@ function Assert-StackInstallationRoot {
 }
 
 function Get-StackInstallationTree {
-    param([string]$Root)
+    param([string]$Root, $Progress)
     $files = New-Object 'System.Collections.Generic.List[string]'
     $directories = New-Object 'System.Collections.Generic.List[string]'
     if (Test-Path -LiteralPath $Root) {
@@ -53,6 +77,7 @@ function Get-StackInstallationTree {
                 $relative = $item.FullName.Substring($Root.Length + 1).Replace('\','/')
                 if ($item.PSIsContainer) { $directories.Add($relative); $pending.Push($item.FullName) }
                 else { $files.Add($relative) }
+                Write-StackOperationProgress $Progress -Completed $files.Count
             }
         }
     }
@@ -82,7 +107,7 @@ function Set-StackRawUserPath {
 }
 
 function Get-StackFileSHA256 {
-    param([string]$Path, [switch]$AllowConcurrentWrite)
+    param([string]$Path, [switch]$AllowConcurrentWrite, $Progress)
     # Stream bytes directly: repeated Get-FileHash/provider setup dominates
     # small Python files. Ordinary owned files still exclude concurrent writers.
     if (-not [IO.Path]::IsPathRooted($Path)) {
@@ -95,7 +120,20 @@ function Get-StackFileSHA256 {
         $sharing, 1MB, [IO.FileOptions]::SequentialScan)
     try {
         $sha = [Security.Cryptography.SHA256]::Create()
-        try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','') }
+        try {
+            if ($null -eq $Progress -or $stream.Length -lt 16MB) {
+                return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','')
+            }
+            # Large model files need feedback within a hash, not just between files.
+            $buffer = New-Object byte[] 8MB
+            while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $null = $sha.TransformBlock($buffer, 0, $read, $buffer, 0)
+                $detail = 'Reading {0}: {1:N0}/{2:N0} MiB' -f [IO.Path]::GetFileName($Path), ($stream.Position / 1MB), ($stream.Length / 1MB)
+                Write-StackOperationProgress $Progress -Detail $detail
+            }
+            $null = $sha.TransformFinalBlock((New-Object byte[] 0), 0, 0)
+            return ([BitConverter]::ToString($sha.Hash)).Replace('-','')
+        }
         finally { $sha.Dispose() }
     }
     finally { $stream.Dispose() }

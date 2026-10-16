@@ -32,7 +32,7 @@ try {
         elseif (Test-Path -LiteralPath $registration) { $InstallPath = (Get-Content -LiteralPath $registration -Raw -Encoding UTF8 | ConvertFrom-Json).InstallPath }
         else { $InstallPath = Join-Path $HOME 'AI\WindowsHybridAgenticStack' }
     }
-    $plan = Get-StackUninstallPlan -InstallPath $InstallPath -RemoveManagedModels:$RemoveManagedModels
+    $plan = Get-StackUninstallPlan -InstallPath $InstallPath -RemoveManagedModels:$RemoveManagedModels -ShowProgress
     Write-Host "Installation: $($plan.Root)"
     Write-Host "Remove tracked files: $($plan.DeleteFiles.Count); restore original files: $($plan.RestoreFiles.Count)"
     Write-Host "Preserve files: $($plan.KeepFiles.Count); unregister local commands: $($plan.UnregisterCommands)"

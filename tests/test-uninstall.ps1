@@ -64,6 +64,19 @@ try {
     finally { Pop-Location }
     Write-Host 'PASS: Streaming SHA256 parity and relative literal paths'
 
+    $largeHashPath = Join-Path $testRoot 'large-progress.bin'
+    $largeBytes = New-Object byte[] (17MB + 7)
+    $largeBytes[0] = 41; $largeBytes[$largeBytes.Length - 1] = 93
+    [IO.File]::WriteAllBytes($largeHashPath, $largeBytes)
+    $progress = New-StackOperationProgress 'Hashing fixture' -Enabled
+    $progress.LastUpdate = -2000L
+    $hashOutput = @(Get-StackFileSHA256 $largeHashPath -Progress $progress 6>&1)
+    $hash = @($hashOutput | Where-Object { $_ -is [string] })[-1]
+    Assert-True ($hash -ceq (Get-FileHash -LiteralPath $largeHashPath -Algorithm SHA256).Hash) 'Chunked progress hash matches independent SHA256 with a partial final block'
+    Assert-True (@($hashOutput | Where-Object { $_.ToString() -like '*Reading large-progress.bin:*MiB*' }).Count -gt 0) 'Long-file verification emits progress from inside the hash'
+    Remove-Item -LiteralPath $largeHashPath
+    Write-Host 'PASS: Long-file progress and independent SHA256 parity'
+
     $session = New-Fixture "fresh A's [stack]"
     Install-StackCommandRegistration -InstallPath $session.Root -PersistPath $false
     Complete-StackInstallationTracking $session $true
