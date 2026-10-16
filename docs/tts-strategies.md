@@ -2,6 +2,15 @@
 
 Chatterbox Turbo, Piper TTS and F5-TTS are bundled. Additional trusted packages can be placed in `tts/strategies/<id>/`; source setup discovers them and standalone setup embeds them at build time. Adding a folder beside an already-built EXE does not change that EXE. Rebuild it to include new packages.
 
+## User guides
+
+- [Chatterbox Turbo](tts/chatterbox-turbo.md)
+- [Piper TTS](tts/piper-tts.md)
+- [F5-TTS and its required transcript](tts/f5-tts.md)
+
+The remainder describes shared engine management and the package-authoring
+contract. Custom strategy code is trusted code: review it before installing.
+
 ## Selecting an engine
 
 ```powershell
@@ -12,7 +21,20 @@ Chatterbox Turbo, Piper TTS and F5-TTS are bundled. Additional trusted packages 
 
 The equivalent standalone options are `--install --voice --tts-engine chatterbox-turbo`. A selector requires the voice component. CLI selection overrides `tts.engine` in configuration. With no explicit selection, configuration wins; interactive setup offers discovered engines when no user configuration was supplied. With only the default engine, no extra menu is necessary. Unattended setup retains the configured/default engine and never asks an engine-selection question. Missing engines and unsupported devices fail instead of selecting a replacement.
 
-The current release supports one installed engine. Engine replacement and automatic package upgrades are deliberately rejected; uninstall the installation before selecting another engine. Ordinary repeat installation of an unchanged package is supported.
+Multiple engines can be installed, each with its own environment, models and
+personal voice directory. Only one service runs at a time. Supply comma-separated
+IDs during setup; the first becomes the saved default:
+
+```powershell
+.\install.ps1 -Voice -TtsEngine 'chatterbox-turbo,piper-tts,f5-tts'
+```
+
+The equivalent EXE option is
+`--install --voice --tts-engine chatterbox-turbo,piper-tts,f5-tts`.
+Interactive selection accepts comma-separated menu numbers, with the first as
+default. Every selected engine's prerequisites and device support are checked.
+Automatic package upgrades are still rejected; repeat installs reuse unchanged
+owned packages and environments.
 
 This also applies to recognized legacy Chatterbox installations. After a completed uninstall, a directory retaining personal voices or other user files can be reused: a new ownership session preserves those surviving files as pre-existing data. Modified package/environment files that collide with a new installation still require review or a different installation directory.
 
@@ -23,6 +45,72 @@ This also applies to recognized legacy Chatterbox installations. After a complet
 | `f5-tts` | CPU or CUDA | Upstream English reference example | WAV plus transcript |
 
 Chatterbox remains the configured default. Interactive setup offers all three engines; unattended setup uses the configured/default engine unless `-TtsEngine` / `--tts-engine` overrides it. All three packages currently require 64-bit Python 3.11 and the Visual C++ x64 runtime.
+
+## Manage installed engines
+
+```powershell
+tts-engine-list
+```
+
+List shows available/installed engines and the saved default and active engine.
+To add a catalog engine, stop speech first, then install it (with confirmation):
+
+```powershell
+tts-stop
+```
+
+```powershell
+tts-engine-install piper-tts
+```
+
+Use `--device cpu`, `--device cuda` or `--device auto` as supported by the
+strategy; default is `auto`. `--yes` accepts the install confirmation.
+The installed, ownership-checked catalog supplies the installer; no arbitrary
+package URL is accepted. Adding an engine preserves the existing default.
+
+```powershell
+tts-engine-default piper-tts
+```
+
+The saved default lives in `tts/engines.json`. The `tts.engine` configuration
+setting chooses the initial setup engine; this command does not rewrite it.
+
+With no argument, this prints the saved default. Changing it does not switch
+a running engine. Commands resolve explicit `--engine`, then the active engine,
+then the saved default:
+
+```powershell
+tts-start --engine f5-tts
+```
+
+```powershell
+tts-voice-add -Path 'C:\Voices\sample.wav' -Name myvoice --engine f5-tts
+```
+
+Selection is checked before switching. Unknown engines, known uninstalled
+engines and unsupported operations have distinct errors. F5's manifest declares
+its transcript requirement; missing/empty text is rejected before model startup.
+Names are local to each engine. A single operation lock prevents competing
+speech, setup and uninstall operations on the same installation.
+
+Preview individual removal:
+
+```powershell
+tts-engine-uninstall f5-tts
+```
+
+Apply with confirmation:
+
+```powershell
+tts-engine-uninstall f5-tts --apply
+```
+
+When removing the default and other installed engines remain, choose the
+replacement explicitly with `--default-engine ENGINE`. Removing the last engine
+clears the default. Its active service is stopped before cleanup. Personal
+voices and modified/unknown files remain; the shared catalog supports reinstall.
+Full stack uninstall removes every installed engine's unchanged owned resources
+and the catalog. Failed installs remain tracked for repair or cleanup.
 
 ## Piper package
 
@@ -90,7 +178,10 @@ The factory receives `device`, `voices_directory` and `models_directory`. It ret
 | `add_voice(name, path)` | Optional reference-WAV registration when `voiceCloning` is true |
 | `remove_voice(name)` | Optional custom-voice removal when `voiceCloning` is true |
 
-The shared service owns loopback HTTP, bounded requests, voice-name validation, error responses, idle shutdown and readiness identity. The strategy owns model-specific inference and voice storage. `default` is reserved. Unsupported reference-voice operations return an explicit unsupported response. Existing `tts-*` and `agent --voice` commands keep their interfaces.
+The shared service owns loopback HTTP, bounded requests, voice-name validation, error responses, idle shutdown and readiness identity. The strategy owns model-specific inference and voice storage. `default` is reserved. Unsupported reference-voice operations return an explicit unsupported response. Existing voice and agent commands remain compatible. Native `tts-*` commands
+also accept `--engine ID`. Installed management commands execute ownership-checked
+application scripts through the native host without loading profiles or changing
+execution policy. Enforced organisation restrictions still apply.
 
 ## Uninstall contract
 
@@ -113,3 +204,29 @@ Keep actual test results, recordings, models, compiled installers and local mach
 `tests/test-piper-strategy.py` exercises pinned downloads, TLS verification, hash failure, safe repeat preparation, preservation of modified/partial files, download bounds and backend voice/device boundaries without network access or ML dependencies.
 
 `tests/test-f5-strategy.py` checks pinned nested asset downloads, offline repeat preparation, corruption/size failures, preservation of modified/partial files, transcript requirements and voice/device boundaries without network access or ML packages.
+
+## Optional voice-reference requirements
+
+A strategy supporting reference voices can declare:
+
+```json
+"voiceReference": { "transcriptRequired": true }
+```
+
+This optional API-v1 field preserves existing manifests. It requests a matching
+UTF-8 `.txt` alongside the WAV, checked before switching or loading an engine.
+Without it, no transcript is required. The backend must still validate all
+inputs independently. Do not add engine-ID conditionals to shared commands.
+Include a user guide with examples, supported operations, required input files,
+licences, error remedies and uninstall behaviour when publishing a strategy.
+
+## Runtime records
+
+Installation ownership schema 2 accepts multiple unique strategy records,
+including interrupted installations. Each engine has
+`tts/engines/<id>/runtime.json`; `tts/engines.json` records the saved default
+(or `null` when none is configured). The service is launched with an explicit
+engine ID and validates its runtime against the installed ownership/package
+records. Single-engine schema-2 layouts retain the legacy `tts/runtime.json`
+fallback until updated; legacy schema-1 Chatterbox requires its existing
+migration path before adding other engines.

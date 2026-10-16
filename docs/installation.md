@@ -579,7 +579,7 @@ Chatterbox Turbo, Piper TTS and F5-TTS are bundled strategies. TTS packages are 
 # Standalone: whas-setup.exe --install --voice --tts-engine f5-tts
 ```
 
-Chatterbox remains the default and supports CPU/CUDA and reference-WAV voice cloning. Piper is a lighter CPU-only option using a pre-trained English voice; it does not install PyTorch or support voice cloning. F5 supports CPU/CUDA and reference voices with a WAV plus an exact transcript; its pretrained weights are CC-BY-NC-4.0 (noncommercial use only). All three require Python 3.11 x64 and the Visual C++ runtime. Interactive setup offers the engine choice. Only one engine is installed at a time; uninstall before switching engines.
+Chatterbox remains the default and supports CPU/CUDA and reference-WAV voice cloning. Piper is a lighter CPU-only option using a pre-trained English voice; it does not install PyTorch or support voice cloning. F5 supports CPU/CUDA and reference voices with a WAV plus an exact transcript; its pretrained weights are CC-BY-NC-4.0 (noncommercial use only). All three require Python 3.11 x64 and the Visual C++ runtime. Interactive setup offers the engine choice. Multiple engines may be installed; only one runs at a time. Select comma-separated engine IDs during setup, with the first as default. See [engine management](tts-strategies.md#manage-installed-engines) for adding, selecting and removing individual engines.
 
 The main uninstaller coordinates the installed strategy's cleanup hook and ownership-based removal. Personal voice data is preserved. See [TTS strategy packages](tts-strategies.md) for the package contract, runtime layout, compatibility and licensing notices.
 
@@ -788,8 +788,9 @@ Check which commands are available:
 Get-Command agent,localagent,tts-start -ErrorAction SilentlyContinue
 ```
 
-Expect only commands for the components you installed. For an actual response
-or speech test, continue with [Using the AI agents](#using-the-ai-agents) and
+Registration supplies the common command names; their presence does not mean
+every component is installed. Use commands for your selected components. For
+an actual response or speech test, continue with [Using the AI agents](#using-the-ai-agents) and
 [TTS commands](#tts-commands). Command discovery alone does not verify inference
 or audio playback.
 
@@ -1079,6 +1080,10 @@ The installer registers the following commands:
 | `tts-voice-add` | Create a voice profile from a WAV reference |
 | `tts-voice-remove` | Remove a custom voice profile |
 | `tts-voice-test` | Test a custom voice |
+| `tts-engine-list` | Show available, installed, default and active engines |
+| `tts-engine-install` | Install another catalog engine |
+| `tts-engine-uninstall` | Preview or apply removal of one engine |
+| `tts-engine-default` | Show or set the saved default engine |
 
 ### Start and stop the service
 
@@ -1098,7 +1103,12 @@ When automatic startup is enabled, requesting speech starts the service if it is
 
 The service listens on `127.0.0.1` and uses the configured port, defaulting to `18765`.
 
-The default idle timeout is ten minutes.
+The default idle timeout is ten minutes. Speech and voice commands accept
+`--engine ID`; without it they use the active engine, or the saved default when
+stopped. Selecting another installed engine stops the previous service first.
+See [engine management](tts-strategies.md#manage-installed-engines) and the
+[Chatterbox](tts/chatterbox-turbo.md), [Piper](tts/piper-tts.md) and
+[F5](tts/f5-tts.md) user guides.
 
 ### Generate speech
 

@@ -1,112 +1,78 @@
 # Quickstart
 
-Run the commands below in **Windows PowerShell 5.1** on Windows 10/11.
-Open **Windows PowerShell** from Start in a normal, non-administrator window.
+Use a normal **Windows PowerShell 5.1** window on Windows 10/11.
+This guide gets you running; the [installation guide](installation.md) covers
+configuration and alternatives in detail.
 
-Source `.ps1` scripts require permission to run. If an ordinary `Restricted`
-policy blocks them, the process-only commands below allow setup without saving
-a policy change. Alternatively, use the standalone EXE. Installed commands
-work under ordinary `Restricted` policy without this option. Enforced
-organisation policies still apply; see [execution-policy guidance](installation.md#powershell-execution-policy).
+## 1. Get the project
 
-## 1. Get the project and open its folder
-
-Without Git: open the [repository](https://github.com/thestonefox/windows-hybrid-agentic-stack),
+Open the [repository](https://github.com/thestonefox/windows-hybrid-agentic-stack),
 select `main`, then **Code > Download ZIP**. In File Explorer, use **Extract All**
-and choose where to extract it. Open the extracted folder containing
-`install.ps1`, click File Explorer's address bar and copy its full path.
-In PowerShell, replace the placeholder below with that copied path:
+and choose a location. Open the extracted folder containing `install.ps1` and
+copy its full path from the address bar. Replace the placeholder below:
 
 ```powershell
 Set-Location -LiteralPath 'PASTE YOUR EXTRACTED PROJECT FOLDER PATH HERE'
 ```
 
-Or, if Git is already installed:
-
-```powershell
-New-Item -ItemType Directory -Path "$HOME\Source" -Force | Out-Null
-Set-Location -LiteralPath "$HOME\Source"
-git clone https://github.com/thestonefox/windows-hybrid-agentic-stack.git
-Set-Location -LiteralPath .\windows-hybrid-agentic-stack
-```
-
-Confirm you are in the folder containing the installer:
-
 ```powershell
 Get-Item .\install.ps1, .\scripts\check-prerequisites.ps1
 ```
 
-Source commands below run from this folder.
-See [getting the project](installation.md#get-the-project-and-open-powershell)
-for more detail.
+Both files should be listed. Source commands below run from this folder.
+[Git cloning instructions](installation.md#clone-with-git-instead) are optional.
+If you already have the EXE, open its containing folder instead; see
+[standalone setup](#standalone-exe-route). A prebuilt release is not yet published.
 
-If you already have `whas-setup.exe`, no source checkout is needed on the
-destination PC. Use `Set-Location` to open its containing folder instead;
-for example, `Set-Location -LiteralPath "$HOME\Downloads"`.
-If you need to build it first, see [standalone EXE setup](#option-b-standalone-exe).
+## 2. Check prerequisites and install what is missing
 
-## 2. Check and install prerequisites
-
-Check what is already installed before installing anything. From the
-repository root, run this read-only check:
+The read-only checker inspects all components by default:
 
 ```powershell
 .\scripts\check-prerequisites.ps1
 ```
 
-If ordinary execution policy blocks the script, use:
+If ordinary execution policy blocks it, use temporary permission for that
+process only:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check-prerequisites.ps1
 ```
 
-With a standalone EXE, run this from its containing directory instead. If you
-do not have it yet, see [standalone EXE build and setup](#option-b-standalone-exe).
+Or, from the folder containing the [standalone EXE](#standalone-exe-route):
 
 ```powershell
 .\whas-setup.exe --check
 ```
 
-Without component flags, both checks inspect all three components. Add
-`-Cloud`, `-Local` or `-Voice` for a subset with the script, or `--cloud`,
-`--local` or `--voice` with the EXE. Review required `FAIL` results
-and any `WARN` messages, install missing prerequisites below, then rerun the
-check. A pass checks prerequisites; it does not prove provider authentication
-or successful inference. See [prerequisite checks](installation.md#prerequisite-checks)
-for the result categories.
+Review required `FAIL` results and any `WARN` messages. Add component flags only
+for a subset; see [check options](installation.md#prerequisite-checks).
+Windows and PowerShell checks must pass. Install missing prerequisites below
+in order, running each command separately. Skip components you do not need.
 
-Skip applications already installed. These commands use
-[WinGet](https://learn.microsoft.com/en-us/windows/package-manager/winget/)
-from a normal PowerShell window, with no execution-policy change. An individual
-prerequisite installer may request administrator approval through a UAC prompt.
+WinGet commands work in normal PowerShell without an execution-policy change.
+An individual installer may request administrator approval through UAC.
+If WinGet is missing, see [WinGet setup](installation.md#1-check-winget).
 
-First confirm the Windows and PowerShell checks pass. Use the temporary
-script permission above if needed. Install missing prerequisites in the order
-below, running each command separately and checking its result.
-
-**Python 3.11 (speech only):**
+**Python (speech only):**
 
 ```powershell
 winget install --id Python.Python.3.11 --exact --source winget
 ```
 
-**Visual C++ x64 runtime (speech only):**
+**Visual C++ x64 (speech only):**
 
 ```powershell
 winget install --id Microsoft.VCRedist.2015+.x64 --exact --source winget
 ```
 
-**NVIDIA driver (optional acceleration for Chatterbox or F5):**
-
-If you want GPU speech, make sure a compatible NVIDIA driver is installed.
-Check detection with:
+**NVIDIA (optional GPU speech with Chatterbox or F5):** install a compatible
+[driver](installation.md#4-nvidia-gpu-drivers-optional-tts-acceleration) if needed.
+Piper and CPU speech do not need it. Check detection:
 
 ```powershell
 nvidia-smi
 ```
-
-See [NVIDIA driver requirements](installation.md#4-nvidia-gpu-drivers-optional-tts-acceleration).
-Skip this for CPU speech, including Piper.
 
 **OpenCode (cloud or local agents):**
 
@@ -122,177 +88,119 @@ winget install --id Ollama.Ollama --exact --source winget
 
 ### Refresh PATH
 
-After installing prerequisites, reload PATH in the same PowerShell window so
-new commands such as `opencode` are available:
+After prerequisite installation, reload PATH in the same PowerShell window:
 
 ```powershell
 $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
 ```
 
-This updates only this window's PATH from saved machine and user values; it
-leaves saved settings and your working directory unchanged. Alternatively,
-close and reopen the terminal application, then return to your project or EXE
-folder. Rerun the prerequisite check before continuing.
+This updates this window from saved values without changing saved settings.
+Alternatively, close and reopen the terminal application, then return to the
+project or EXE folder. Rerun the prerequisite check before continuing.
 
 ## 3. Connect your cloud provider
 
-Skip this step for local-only or speech-only setup.
+Skip this for local-only or speech-only installation:
 
 ```powershell
 opencode
 ```
 
-In OpenCode, use `/connect` to sign in to your provider and `/models` to select
-your model. Exit OpenCode when done.
+Use `/connect` to sign in and `/models` to select your model, then exit OpenCode.
 
 ## 4. Install the stack
 
-Choose either route below. Both require the external prerequisites above.
-
-### Option A: PowerShell source installer
-
-Run the interactive installer and choose cloud agents, local agents, speech,
-or a combination:
+From the repository root, choose components interactively:
 
 ```powershell
 .\install.ps1
 ```
 
-Or select components directly:
-
-```powershell
-# Cloud agents only
-.\install.ps1 -Cloud
-
-# Cloud and local agents with speech
-.\install.ps1 -Cloud -Local -Voice
-```
-
-If scripts are blocked, use this instead of the source commands above, after
-reviewing the source:
+If ordinary execution policy blocks it, use this instead:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-This permits scripts only in that installer process and its children. The
-parent terminal and saved user/machine policies stay unchanged.
-
-### Option B: Standalone EXE
-
-A prebuilt release is not yet published. To build the EXE from source, run this
-in the repository root using 64-bit Windows PowerShell 5.1 in a context that
-permits the build script:
-
-```powershell
-.\scripts\build-setup.ps1
-```
-
-If ordinary execution policy blocks the build script, use:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-setup.ps1
-```
-
-Copy `dist\whas-setup.exe` to the destination PC if needed. No source checkout
-is needed on that PC. From the directory containing the EXE, check and install
-your chosen components:
-
-```powershell
-# Cloud agents only
-.\whas-setup.exe --check --cloud
-.\whas-setup.exe --install --cloud
-
-# Or cloud and local agents with speech
-.\whas-setup.exe --check --cloud --local --voice
-.\whas-setup.exe --install --cloud --local --voice
-```
-
-The EXE is **unsigned**. Windows may warn that the app is unrecognized or the
-publisher is unknown. Read [unsigned EXE verification](installation.md#unsigned-exe-and-windows-warnings)
-before proceeding. Some Windows security policies may block it entirely.
-
-Both installers ask for confirmation and offer to download a missing local
-model. The default local model is `qwen3:8b`. Chatterbox Turbo is the default
-speech engine; use `--tts-engine piper-tts` or `--tts-engine f5-tts` with EXE
-voice installation to choose another engine. Source interactive setup offers
-the engine choice. F5 pretrained weights are for noncommercial use only.
-
+The default local model is `qwen3:8b`; setup offers to download it if missing.
+For speech, choose one or more engines; the first is the default. Chatterbox is
+the initial default. F5 pretrained weights are for noncommercial use only.
 The default destination is `%USERPROFILE%\AI\WindowsHybridAgenticStack`.
-Keep the setup EXE outside that directory if you want to use it for uninstall.
 
-## 5. Try the components you installed
+### Standalone EXE route
 
-Run the [PATH refresh command](#refresh-path) again to pick up the stack
-commands, or close and reopen your terminal application.
+If you need to build the EXE first, see [standalone build instructions](installation.md#standalone-executable-setup),
+including [temporary build permission](installation.md#powershell-execution-policy).
+Copy `dist\whas-setup.exe` to the destination PC; no source checkout is needed
+there. Keep the EXE outside the installation directory.
+
+The EXE is **unsigned**; read [Windows warnings and verification](installation.md#unsigned-exe-and-windows-warnings).
+From its containing folder, check prerequisites as above, then install:
 
 ```powershell
-# Cloud agent
+.\whas-setup.exe --install
+```
+
+With no component flags, EXE setup uses configured defaults (initially all
+components). See [component and engine options](installation.md#standalone-executable-setup)
+if you only want part of the stack.
+
+## 5. Try your installed components
+
+Run the [PATH refresh command](#refresh-path) again or reopen the terminal
+application. Use the examples for components you installed:
+
+```powershell
 agent "Explain the difference between RAM and storage"
+```
 
-# Local agent
+```powershell
 localagent "What is 2 plus 2?"
+```
 
-# Speech
+```powershell
 tts-say "Hello, the speech service is working."
+```
 
-# Cloud response spoken aloud (requires cloud agents and speech)
+```powershell
 agent -v "Explain gravity in one sentence"
 ```
 
-The first speech request loads the selected model and can take some time.
+The first speech request loads a model. See [engine management](tts-strategies.md#manage-installed-engines)
+and the [per-engine guides](tts-strategies.md#user-guides) for selection and custom voices.
 
 ## Uninstall
 
-For source-script cleanup, run from the repository root. Preview removal first:
+From the repository root or installed directory, preview first:
 
 ```powershell
 .\uninstall.ps1
 ```
 
-Then apply it with confirmation. This also removes unchanged Ollama models
-created by the stack:
+Apply with confirmation, including unchanged installer-created Ollama models:
 
 ```powershell
 .\uninstall.ps1 -Apply
 ```
 
-If ordinary execution policy blocks the script, use the process-only fallback
-instead. Preview:
+Add `-RetainManagedModels` to keep those models. If execution policy blocks the
+script, see the [temporary uninstall permission commands](installation.md#if-execution-policy-blocks-the-uninstall-script).
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\uninstall.ps1
-```
-
-Apply, including unchanged stack-created models:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\uninstall.ps1 -Apply
-```
-
-Or use the standalone EXE from its containing directory. Preview:
+Or use the EXE from its containing folder. Preview:
 
 ```powershell
 .\whas-setup.exe --uninstall
 ```
 
-Apply with confirmation, including unchanged stack-created Ollama models:
+Apply:
 
 ```powershell
 .\whas-setup.exe --uninstall --apply
 ```
 
-Use one route, not both. Unchanged, installer-created Ollama models are removed
-by default. Add `-RetainManagedModels` to the script, or
-`--retain-managed-models` to the EXE, to keep them. For a custom destination, add `-InstallPath 'D:\AI\AgentStack'`
-to the script or `--install-path 'D:\AI\AgentStack'` to the EXE, using your actual
-installation path.
-
-Cleanup removes tracked stack files and command registration. It preserves
-personal voices, edited or added files, original Ollama models, and separately
-installed applications such as OpenCode, Ollama, Python and Visual C++.
-Preserved files may leave the installation folder in place. Review the cleanup
-receipt printed by the uninstaller.
+Add `--retain-managed-models` to keep stack-created models. Choose one uninstall
+route. Personal voices, modified/unknown files, original models and separately
+installed prerequisites are preserved. Read the cleanup receipt.
 
 After uninstalling, reload PATH in the same PowerShell window, or close
 and reopen the terminal application:
@@ -307,10 +215,6 @@ Then check command removal has succeeded:
 Get-Command agent,localagent,tts-start -ErrorAction SilentlyContinue
 ```
 
-No output means those commands are no longer discoverable. See the
-[full uninstall guide](installation.md#uninstall-a-tracked-installation)
-for ownership rules and cleanup limitations.
-
-For custom settings, voice profiles and removal, see the
-[installation guide](installation.md). If a step fails, see
-[troubleshooting](troubleshooting.md).
+No output means those commands are no longer discoverable, unless uninstall
+restored an earlier installation's registration. See [full removal details](installation.md#uninstallation)
+for custom paths and preservation rules, or [troubleshooting](troubleshooting.md).

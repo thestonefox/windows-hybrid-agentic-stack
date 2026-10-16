@@ -34,7 +34,9 @@ agent command to speak its response when speech is installed.
 ## Documentation
 
 - [Troubleshooting](docs/troubleshooting.md)
-- [TTS engines and strategy authoring](docs/tts-strategies.md)
+- [TTS engine management and strategy authoring](docs/tts-strategies.md)
+- Engine guides: [Chatterbox](docs/tts/chatterbox-turbo.md), [Piper](docs/tts/piper-tts.md), [F5](docs/tts/f5-tts.md)
+- [Builds and releases](docs/releases.md)
 - [Installation testing and rollback](docs/install-test-rollback.md)
 
 ## Development
