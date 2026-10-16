@@ -1,6 +1,33 @@
 #Requires -Version 5.1
 # Shared ownership tracking. Loading this file performs no installation or cleanup.
 
+function Get-StackCommandNames {
+    param([switch]$Legacy)
+    $names = @('agent','agentdo','localagent','localagentdo','tts-start','tts-stop','tts-status',
+        'tts-say','tts-voice-list','tts-voice-add','tts-voice-remove','tts-voice-test')
+    if (-not $Legacy) { $names += @('tts-engine-list','tts-engine-install','tts-engine-uninstall','tts-engine-default') }
+    return $names
+}
+function Test-StackCommandNames {
+    param([string[]]$Names)
+    return (@(Compare-Object @(Get-StackCommandNames) $Names).Count -eq 0 -or
+        @(Compare-Object @(Get-StackCommandNames -Legacy) $Names).Count -eq 0)
+}
+
+function Enter-StackOperationLock {
+    param([string]$Root)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $key = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($Root).TrimEnd('\').ToLowerInvariant())))).Replace('-','') }
+    finally { $sha.Dispose() }
+    $mutex = New-Object Threading.Mutex($false, ('Local\WHAS-' + $key))
+    try {
+        try { $acquired = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $acquired = $true }
+        if (-not $acquired) { throw 'Another stack operation is running. Wait for it to finish and retry.' }
+        return $mutex
+    }
+    catch { $mutex.Dispose(); throw }
+}
+
 function New-StackOperationProgress {
     param([string]$Activity, [switch]$Enabled, [string]$Unit = 'files')
     if (-not $Enabled) { return $null }
@@ -77,7 +104,9 @@ function Get-StackInstallationTree {
                 $relative = $item.FullName.Substring($Root.Length + 1).Replace('\','/')
                 if ($item.PSIsContainer) { $directories.Add($relative); $pending.Push($item.FullName) }
                 else { $files.Add($relative) }
-                Write-StackOperationProgress $Progress -Completed $files.Count
+                if ($Progress -and $Progress.Timer.ElapsedMilliseconds - $Progress.LastUpdate -ge 2000) {
+                    Write-StackOperationProgress $Progress -Completed $files.Count
+                }
             }
         }
     }
@@ -159,15 +188,18 @@ function Read-StackInstallationState {
         $state.OwnerSid -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or
         $state.InstallationId -notmatch '^[a-f0-9]{32}$') { throw 'Invalid or foreign installation ownership record.' }
     if ($state.SchemaVersion -eq 2) {
-        if ($state.TtsStrategies -isnot [array] -or $state.TtsStrategies.Count -ne 1) { throw 'Invalid strategy installation record.' }
-        $strategy = $state.TtsStrategies[0]
-        if ($strategy.Id -notmatch '^[a-z][a-z0-9-]{0,47}$' -or $strategy.Context.InstallPath -ine $Root -or
-            $strategy.Context.Engine -cne $strategy.Id -or $strategy.ApiVersion -ne 1 -or $strategy.Status -notin @('Installing','Prepared','Installed')) { throw 'Invalid strategy context.' }
-        $environment = "tts/engines/$($strategy.Id)/.venv"
-        if ($strategy.Context.EnvironmentPath -cne $environment -and
-            -not ($strategy.Id -ceq 'chatterbox-turbo' -and $strategy.Context.EnvironmentPath -ceq '.venv' -and -not $state.PreexistingVenv)) { throw 'Invalid strategy environment path.' }
-        if ($strategy.Context.ModelsPath -cne "tts/engines/$($strategy.Id)/models" -or
-            $strategy.Context.VoicesPath -notin @('voices',"voices/$($strategy.Id)")) { throw 'Invalid strategy resource paths.' }
+        if ($state.TtsStrategies -isnot [array]) { throw 'Invalid strategy installation record.' }
+        $strategyIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($strategy in $state.TtsStrategies) {
+            if ($strategy.Id -notmatch '^[a-z][a-z0-9-]{0,47}$' -or -not $strategyIds.Add($strategy.Id) -or
+                $strategy.Context.InstallPath -ine $Root -or $strategy.Context.Engine -cne $strategy.Id -or
+                $strategy.ApiVersion -ne 1 -or $strategy.Status -notin @('Installing','Prepared','Installed')) { throw 'Invalid strategy context.' }
+            $environment = "tts/engines/$($strategy.Id)/.venv"
+            if ($strategy.Context.EnvironmentPath -cne $environment -and
+                -not ($strategy.Id -ceq 'chatterbox-turbo' -and $strategy.Context.EnvironmentPath -ceq '.venv' -and -not $state.PreexistingVenv)) { throw 'Invalid strategy environment path.' }
+            if ($strategy.Context.ModelsPath -cne "tts/engines/$($strategy.Id)/models" -or
+                $strategy.Context.VoicesPath -notin @('voices',"voices/$($strategy.Id)")) { throw 'Invalid strategy resource paths.' }
+        }
     }
     foreach ($entry in @($state.Files) + @($state.OriginalFiles)) {
         $null = Resolve-StackOwnedPath -Root $Root -Relative $entry.Path
@@ -230,8 +262,8 @@ function Start-StackInstallationTracking {
         $commandsPath = Join-Path $registration 'commands.json'
         if (Test-Path -LiteralPath $commandsPath) {
             $commands = Get-Content -LiteralPath $commandsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            $allowed = @('agent','agentdo','localagent','localagentdo','tts-start','tts-stop','tts-status','tts-say','tts-voice-list','tts-voice-add','tts-voice-remove','tts-voice-test')
-            if ($commands.SchemaVersion -ne 1 -or @(Compare-Object $allowed @($commands.Commands)).Count -gt 0) { throw 'Existing command registration is not recognised.' }
+            if ($commands.SchemaVersion -ne 1 -or -not (Test-StackCommandNames @($commands.Commands))) { throw 'Existing command registration is not recognised.' }
+            $allowed = @($commands.Commands)
             $previousFiles = @()
             $bin = Join-Path $registration 'bin'
             $null = Get-StackInstallationTree -Root $registration
@@ -259,8 +291,8 @@ function Start-StackInstallationTracking {
     foreach ($entry in $state.OriginalFiles) { $originals[$entry.Path] = $entry }
     $managedFiles = @('opencode.json','AGENTS.md','config/defaults.json','config/config.json',
         'scripts/agent-commands.ps1','scripts/config.ps1','scripts/configuration.ps1',
-        'scripts/command-registration.ps1','scripts/installation-state.ps1','scripts/uninstall.ps1','scripts/script-invocation.ps1',
-        'tts/tts.ps1','tts/tts_service.py','tts/strategy-management.ps1','tts/runtime.json','uninstall.ps1')
+        'scripts/command-registration.ps1','scripts/installation-state.ps1','scripts/uninstall.ps1','scripts/script-invocation.ps1','scripts/check-prerequisites.ps1',
+        'tts/tts.ps1','tts/tts_service.py','tts/strategy-management.ps1','tts/engine-management.ps1','tts/install-tts.ps1','tts/strategy.schema.json','tts/runtime.json','tts/engines.json','uninstall.ps1')
     foreach ($relative in $tree.Files | Where-Object { $_ -ne '.whas-installation.json' }) {
         if (Test-StackGeneratedFile $relative $state) { continue }
         $owned = $known.ContainsKey($relative)
@@ -268,7 +300,8 @@ function Start-StackInstallationTracking {
             (Get-StackFileSHA256 (Join-Path $root $relative)) -cne $known[$relative].SHA256
         if (-not $owned -or $changed) {
             if (@($state.PreexistingPaths) -notcontains $relative) { $state.PreexistingPaths += $relative }
-            if ($relative -in $managedFiles -and (-not $originals.ContainsKey($relative) -or $changed)) {
+            $managedRuntime = $relative -cmatch '^tts/engines/[a-z][a-z0-9-]{0,47}/runtime\.json$'
+            if (($relative -in $managedFiles -or $managedRuntime) -and (-not $originals.ContainsKey($relative) -or $changed)) {
                 $bytes = [IO.File]::ReadAllBytes((Join-Path $root $relative))
                 if ($bytes.Length -gt 4MB) { throw "Managed configuration too large to preserve: $relative" }
                 $originals[$relative] = [pscustomobject]@{ Path = $relative; Base64 = [Convert]::ToBase64String($bytes); SHA256 = Get-StackFileSHA256 (Join-Path $root $relative) }
@@ -327,7 +360,7 @@ function Complete-StackInstallationTracking {
     foreach ($entry in $state.RegistrationBackups) { $backups[$entry.Name] = $entry }
     $regBin = Join-Path $state.RegistrationDirectory 'bin'
     if (Test-Path -LiteralPath $regBin) {
-        foreach ($file in Get-ChildItem -LiteralPath $regBin -File | Where-Object { $_.Name -match '^(agent|agentdo|localagent|localagentdo|tts-(start|stop|status|say|voice-(list|add|remove|test)))\.exe\.bak\.[a-f0-9]{32}$|^install-root\.txt\.bak\.[a-f0-9]{32}$' }) {
+        foreach ($file in Get-ChildItem -LiteralPath $regBin -File | Where-Object { $_.Name -match '^(agent|agentdo|localagent|localagentdo|tts-(start|stop|status|say|voice-(list|add|remove|test)|engine-(list|install|uninstall|default)))\.exe\.bak\.[a-f0-9]{32}$|^install-root\.txt\.bak\.[a-f0-9]{32}$' }) {
             if (-not $Session.RegBefore.ContainsKey($file.Name)) { $backups[$file.Name] = [pscustomobject]@{ Name = $file.Name; SHA256 = Get-StackFileSHA256 $file.FullName } }
         }
     }

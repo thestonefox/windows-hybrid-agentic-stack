@@ -56,9 +56,9 @@ try {
     $state = Read-StackInstallationState $InstallPath
     if ($null -eq $state) { throw 'Run the root installer so strategy resources are ownership-tracked.' }
     $existing = @($state.TtsStrategies | Where-Object { $_ -and $_.Id -eq $TtsEngine })
-    if (@($state.TtsStrategies | Where-Object { $_ -and $_.Id -ne $TtsEngine }).Count) { throw 'Engine switching is not supported yet. Uninstall the current installation first.' }
     $legacyChatterbox = -not $state.PreexistingVenv -and @($state.Files.Path | Where-Object { $_ -like '.venv/*' }).Count -gt 0
-    if (-not $existing.Count -and $legacyChatterbox -and $TtsEngine -ne 'chatterbox-turbo') { throw 'Uninstall the owned legacy Chatterbox installation before selecting a different engine.' }
+    $migratedChatterbox = @($state.TtsStrategies | Where-Object { $_ -and $_.Id -ceq 'chatterbox-turbo' }).Count -gt 0
+    if (-not $existing.Count -and $legacyChatterbox -and -not $migratedChatterbox -and $TtsEngine -ne 'chatterbox-turbo') { throw 'Migrate the owned legacy Chatterbox installation before adding another engine.' }
     $environment = "tts/engines/$TtsEngine/.venv"
     $voices = "voices/$TtsEngine"
     if ($existing.Count) {
@@ -99,18 +99,37 @@ try {
         $destination = Resolve-TtsPackagePath $InstallPath $relative
         if ((Test-Path -LiteralPath $destination) -and (Get-StackFileSHA256 $destination) -cne (Get-StackFileSHA256 $source)) { throw 'Existing strategy package differs; automatic upgrades are not supported.' }
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
-        Copy-Item -LiteralPath $source -Destination $destination -Force
+        if ([IO.Path]::GetFullPath($source) -ine [IO.Path]::GetFullPath($destination)) { Copy-Item -LiteralPath $source -Destination $destination -Force }
         $assets += [pscustomobject]@{Path=$relative; SHA256=(Get-StackFileSHA256 $destination)}
     }
-    foreach ($file in @('tts.ps1','tts_service.py','strategy-management.ps1')) {
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $InstallPath "tts/$file") -Force
+    foreach ($file in @('tts.ps1','tts_service.py','strategy-management.ps1','install-tts.ps1','engine-management.ps1','strategy.schema.json')) {
+        $sharedSource = Join-Path $PSScriptRoot $file
+        $sharedDest = Join-Path $InstallPath "tts/$file"
+        if ([IO.Path]::GetFullPath($sharedSource) -ine [IO.Path]::GetFullPath($sharedDest)) { Copy-Item -LiteralPath $sharedSource -Destination $sharedDest -Force }
     }
     $record = [pscustomobject]@{Id=$TtsEngine; Version=$package.Manifest.version; ApiVersion=1; Status='Installing'; PackageFiles=$assets; UninstallPath="$installedPackage/$($package.Manifest.entrypoints.uninstall)"; Context=$context}
     $state.SchemaVersion = 2
-    $state | Add-Member -NotePropertyName TtsStrategies -NotePropertyValue @($record) -Force
+    $records = @($state.TtsStrategies | Where-Object { $_ -and $_.Id -cne $TtsEngine }) + @($record)
+    $state | Add-Member -NotePropertyName TtsStrategies -NotePropertyValue $records -Force
     Write-StackInstallationState $InstallPath $state
     $runtime = [pscustomobject]@{schemaVersion=1; engine=$TtsEngine; environmentPath=$environment; voicesPath=$voices; modelsPath=$context.ModelsPath; backendPath="$installedPackage/$($package.Manifest.entrypoints.backend)"; capabilities=$package.Manifest.capabilities; device=$Device}
-    [IO.File]::WriteAllText((Join-Path $InstallPath 'tts/runtime.json'), ($runtime | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
+    $runtimeJson = $runtime | ConvertTo-Json -Depth 8
+    New-Item -ItemType Directory -Path (Join-Path $InstallPath "tts/engines/$TtsEngine") -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $InstallPath "tts/engines/$TtsEngine/runtime.json"), $runtimeJson, (New-Object Text.UTF8Encoding($false)))
+    if (-not (Test-Path -LiteralPath (Join-Path $InstallPath 'tts/runtime.json'))) {
+        [IO.File]::WriteAllText((Join-Path $InstallPath 'tts/runtime.json'), $runtimeJson, (New-Object Text.UTF8Encoding($false)))
+    }
+    # Keep a verified catalog so additional engines can be installed later.
+    foreach ($catalogPackage in @(Get-TtsStrategies -Root $repoRoot)) {
+        foreach ($catalogFile in $catalogPackage.Files) {
+            $catalogSource = Resolve-TtsPackagePath $catalogPackage.Directory $catalogFile
+            $catalogDest = Resolve-TtsPackagePath $InstallPath "tts/strategies/$($catalogPackage.Manifest.id)/$catalogFile"
+            if ([IO.Path]::GetFullPath($catalogSource) -ieq [IO.Path]::GetFullPath($catalogDest)) { continue }
+            if ((Test-Path -LiteralPath $catalogDest) -and (Get-StackFileSHA256 $catalogDest) -cne (Get-StackFileSHA256 $catalogSource)) { throw 'Catalog package changed; automatic upgrades are not supported.' }
+            New-Item -ItemType Directory -Path (Split-Path -Parent $catalogDest) -Force | Out-Null
+            Copy-Item -LiteralPath $catalogSource -Destination $catalogDest -Force
+        }
+    }
     Invoke-StackSetupScript -Path (Resolve-TtsPackagePath $package.Directory $package.Manifest.entrypoints.install) -Arguments @{Context=$context; PrepareOnly=[bool]$PrepareOnly}
     if ($LASTEXITCODE -ne 0) { throw "Strategy installation failed (exit $LASTEXITCODE)." }
     $record.Status = if ($PrepareOnly) { 'Prepared' } else { 'Installed' }

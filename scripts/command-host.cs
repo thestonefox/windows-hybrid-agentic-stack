@@ -12,6 +12,7 @@ using System.Management.Automation.Host;
 using System.Management.Automation.Runspaces;
 using System.Security;
 using System.Runtime.InteropServices;
+using System.Collections;
 
 namespace WindowsHybridAgenticStack {
     public sealed class ConsoleUI : PSHostUserInterface {
@@ -24,8 +25,8 @@ namespace WindowsHybridAgenticStack {
             ConsoleColor previousForeground = Console.ForegroundColor;
             ConsoleColor previousBackground = Console.BackgroundColor;
             try {
-                Console.ForegroundColor = foreground;
-                Console.BackgroundColor = background;
+                if (Enum.IsDefined(typeof(ConsoleColor), foreground)) Console.ForegroundColor = foreground;
+                if (Enum.IsDefined(typeof(ConsoleColor), background)) Console.BackgroundColor = background;
                 Console.Write(value);
             }
             finally {
@@ -84,7 +85,34 @@ namespace WindowsHybridAgenticStack {
         public override void NotifyEndApplication() { }
     }
 
+    public sealed class CommandScriptResult {
+        public int ExitCode;
+        public Collection<PSObject> Output;
+    }
+
     public static class CommandHost {
+        public static string ManagedRoot { get; private set; }
+
+        public static CommandScriptResult InvokeManagedScript(ScriptBlock script, Hashtable arguments) {
+            ConsoleHost host = new ConsoleHost();
+            using (Runspace runspace = RunspaceFactory.CreateRunspace(host)) {
+                runspace.Open();
+                runspace.SessionStateProxy.Path.SetLocation(Environment.CurrentDirectory);
+                using (PowerShell ps = PowerShell.Create()) {
+                    ps.Runspace = runspace;
+                    Load(ps, Path.Combine(ManagedRoot, "scripts", "installation-state.ps1"), null);
+                    Load(ps, Path.Combine(ManagedRoot, "scripts", "script-invocation.ps1"), null);
+                    runspace.SessionStateProxy.SetVariable("ManagedEntrypoint", script);
+                    runspace.SessionStateProxy.SetVariable("ManagedArguments", arguments);
+                    ps.Commands.Clear(); ps.Streams.Error.Clear();
+                    ps.AddScript("& $ManagedEntrypoint @ManagedArguments", false);
+                    var output = ps.Invoke();
+                    foreach (var error in ps.Streams.Error) Console.Error.WriteLine(error);
+                    return new CommandScriptResult { Output = output,
+                        ExitCode = host.ExitRequested ? host.ExitCode : (ps.HadErrors ? 1 : 0) };
+                }
+            }
+        }
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct StartupInfo {
             public int Size;
@@ -124,7 +152,11 @@ namespace WindowsHybridAgenticStack {
             { "tts-start", new string[0] }, { "tts-stop", new string[0] }, { "tts-status", new string[0] },
             { "tts-voice-list", new string[0] }, { "tts-say", new string[] { "Text", "Voice" } },
             { "tts-voice-add", new string[] { "Path", "Name" } },
-            { "tts-voice-remove", new string[] { "Name" } }, { "tts-voice-test", new string[] { "Name" } }
+            { "tts-voice-remove", new string[] { "Name" } }, { "tts-voice-test", new string[] { "Name" } },
+            { "tts-engine-list", new string[0] },
+            { "tts-engine-install", new string[] { "Engine", "Device", "Yes" } },
+            { "tts-engine-uninstall", new string[] { "Engine", "DefaultEngine", "Apply", "Yes" } },
+            { "tts-engine-default", new string[] { "Engine" } }
         };
 
         private static void Load(PowerShell ps, string path, string root) {
@@ -152,6 +184,7 @@ namespace WindowsHybridAgenticStack {
             if (!File.Exists(registration)) throw new FileNotFoundException("Local stack registration is missing.", registration);
             string root = File.ReadAllText(registration).TrimEnd('\r', '\n');
             if (!Path.IsPathRooted(root) || !Directory.Exists(root)) throw new DirectoryNotFoundException("Stack installation is missing: " + root);
+            ManagedRoot = root;
             ConsoleHost host = new ConsoleHost();
             using (Runspace runspace = RunspaceFactory.CreateRunspace(host)) {
                 runspace.Open();
@@ -173,6 +206,10 @@ namespace WindowsHybridAgenticStack {
                         Load(ps, Path.Combine(root, "scripts", "agent-commands.ps1"), root);
                     }
                     string tts = Path.Combine(root, "tts", "tts.ps1");
+                    if (File.Exists(Path.Combine(root, "scripts", "installation-state.ps1")))
+                        Load(ps, Path.Combine(root, "scripts", "installation-state.ps1"), null);
+                    if (File.Exists(Path.Combine(root, "scripts", "script-invocation.ps1")))
+                        Load(ps, Path.Combine(root, "scripts", "script-invocation.ps1"), null);
                     string strategies = Path.Combine(root, "tts", "strategy-management.ps1");
                     if (File.Exists(strategies)) Load(ps, strategies, null);
                     if (!isAgent || File.Exists(tts)) Load(ps, tts, root);
@@ -186,8 +223,11 @@ namespace WindowsHybridAgenticStack {
                         for (int i = 0; i < args.Length; i++) {
                             string parameter = null;
                             if (args[i].StartsWith("-", StringComparison.Ordinal)) {
-                                foreach (string candidate in allowed) if (String.Equals(args[i], "-" + candidate, StringComparison.OrdinalIgnoreCase)) parameter = candidate;
+                                string option = args[i].TrimStart('-').Replace("-", "");
+                                foreach (string candidate in allowed) if (String.Equals(option, candidate, StringComparison.OrdinalIgnoreCase)) parameter = candidate;
+                                if (parameter == null && String.Equals(option, "Engine", StringComparison.OrdinalIgnoreCase)) parameter = "Engine";
                                 if (parameter == null) throw new ArgumentException("Unknown option: " + args[i]);
+                                if (parameter == "Yes" || parameter == "Apply") { ps.AddParameter(parameter, true); continue; }
                                 if (++i >= args.Length) throw new ArgumentException("Missing value after -" + parameter);
                                 ps.AddParameter(parameter, args[i]);
                             } else ps.AddArgument(args[i]);

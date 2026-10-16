@@ -53,6 +53,7 @@ $ttsInstallScript = Join-Path $repoRoot 'tts\install-tts.ps1'
 $registrationHelper = Join-Path $repoRoot 'scripts\command-registration.ps1'
 $trackingSession = $null
 $installationSucceeded = $false
+$operationLock = $null
 
 function Read-YesNo {
     param(
@@ -166,7 +167,8 @@ try {
 
     . (Get-StackSetupScript (Join-Path $repoRoot 'tts\strategy-management.ps1'))
     if ($TtsEngine -and -not $Voice) { throw '-TtsEngine requires -Voice.' }
-    if ($TtsEngine) { $config.tts.engine = $TtsEngine }
+    $requestedEngines = @()
+    if ($TtsEngine) { $requestedEngines = @($TtsEngine.Split(',') | ForEach-Object { $_.Trim() }); $config.tts.engine = $requestedEngines[0] }
     $explicitSelection = $Cloud -or $Local -or $Voice
 
     if (-not $explicitSelection) {
@@ -207,15 +209,23 @@ try {
         $available = @(Get-TtsStrategies -Root $repoRoot)
         if (-not $Yes -and -not $TtsEngine -and
             -not (Test-Path -LiteralPath (Join-Path $repoRoot 'config/config.json'))) {
-            $config.tts.engine = Select-TtsEngine -Manifests @($available | ForEach-Object { $_.Manifest }) -Default $config.tts.engine
+            $requestedEngines = @((Select-TtsEngine -Manifests @($available | ForEach-Object { $_.Manifest }) -Default $config.tts.engine).Split(','))
+            $config.tts.engine = $requestedEngines[0]
         }
-        $ttsPackage = Get-TtsStrategy -Root $repoRoot -Id $config.tts.engine
-        if ($config.tts.device -ne 'auto' -and $config.tts.device -notin $ttsPackage.Manifest.devices) { throw 'Selected strategy does not support this device.' }
-        Write-Host "TTS package: $($ttsPackage.Manifest.name) $($ttsPackage.Manifest.version); licence: $($ttsPackage.Manifest.license)"
-        foreach ($model in $ttsPackage.Manifest.models) {
-            $pin = if ($model.revision) { "revision $($model.revision)" } else { "SHA256 $($model.sha256)" }
-            Write-Host "Model download: $($model.source), $pin; licence: $($model.license)"
+        if (-not $requestedEngines.Count) { $requestedEngines = @($config.tts.engine) }
+        if (@($requestedEngines | Select-Object -Unique).Count -ne $requestedEngines.Count) { throw 'Duplicate engine selection.' }
+        $selectedPackages = @()
+        foreach ($engineId in $requestedEngines) {
+            $ttsPackage = Get-TtsStrategy -Root $repoRoot -Id $engineId
+            if ($config.tts.device -ne 'auto' -and $config.tts.device -notin $ttsPackage.Manifest.devices) { throw 'Selected strategy does not support this device.' }
+            Write-Host "TTS package: $($ttsPackage.Manifest.name) $($ttsPackage.Manifest.version); licence: $($ttsPackage.Manifest.license)"
+            foreach ($model in $ttsPackage.Manifest.models) {
+                $pin = if ($model.revision) { "revision $($model.revision)" } else { "SHA256 $($model.sha256)" }
+                Write-Host "Model download: $($model.source), $pin; licence: $($model.license)"
+            }
+            $selectedPackages += $ttsPackage
         }
+        $ttsPackage = $selectedPackages[0]
     }
 
     if ([string]::IsNullOrWhiteSpace($InstallPath)) {
@@ -278,6 +288,12 @@ try {
 
     if ($Voice) { $checkArguments.StrategyManifestJson = ($ttsPackage.Manifest | ConvertTo-Json -Depth 12 -Compress) }
     Invoke-StackSetupScript -Path $prerequisiteScript -Arguments $checkArguments
+    if ($LASTEXITCODE -eq 0 -and $Voice) {
+        foreach ($additional in @($selectedPackages | Select-Object -Skip 1)) {
+            Invoke-StackSetupScript -Path $prerequisiteScript -Arguments @{Voice=$true;StrategyManifestJson=($additional.Manifest | ConvertTo-Json -Depth 12 -Compress)}
+            if ($LASTEXITCODE -ne 0) { break }
+        }
+    }
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host ''
@@ -298,8 +314,9 @@ try {
         $safeModel = ([string]$config.agents.local.model).ToLowerInvariant() -replace '[^a-z0-9-]', '-'
         $trackingArguments.ManagedModelName = 'whas-' + $safeModel.Trim('-') + '-ctx' + $config.agents.local.contextSize
     }
+    $operationLock = Enter-StackOperationLock $InstallPath
     $trackingSession = Start-StackInstallationTracking @trackingArguments
-    foreach ($relative in @('uninstall.ps1','scripts\uninstall.ps1','scripts\installation-state.ps1','scripts\command-registration.ps1','scripts\script-invocation.ps1','tts\strategy-management.ps1')) {
+    foreach ($relative in @('uninstall.ps1','scripts\uninstall.ps1','scripts\installation-state.ps1','scripts\command-registration.ps1','scripts\script-invocation.ps1','scripts\configuration.ps1','tts\strategy-management.ps1','scripts\check-prerequisites.ps1')) {
         Copy-StackFile -Source (Join-Path $repoRoot $relative) -Destination (Join-Path $InstallPath $relative)
     }
 
@@ -344,10 +361,15 @@ try {
         Write-Host "Installing TTS strategy: $($config.tts.engine)"
         Write-Host ''
 
-        Invoke-StackSetupScript -Path $ttsInstallScript -Arguments @{InstallPath=$InstallPath;Device=[string]$config.tts.device;TtsEngine=[string]$config.tts.engine}
-
-        if ($LASTEXITCODE -ne 0) {
-            throw "TTS strategy installation failed: $($config.tts.engine)."
+        foreach ($engineId in $requestedEngines) {
+            Invoke-StackSetupScript -Path $ttsInstallScript -Arguments @{InstallPath=$InstallPath;Device=[string]$config.tts.device;TtsEngine=$engineId}
+            if ($LASTEXITCODE -ne 0) { throw "TTS strategy installation failed: $engineId." }
+        }
+        $selectedRuntime = Join-Path $InstallPath "tts/engines/$($config.tts.engine)/runtime.json"
+        if (Test-Path -LiteralPath $selectedRuntime) {
+            Copy-Item -LiteralPath $selectedRuntime -Destination (Join-Path $InstallPath 'tts/runtime.json') -Force
+            $engineRegistry = [pscustomobject]@{schemaVersion=1;defaultEngine=$config.tts.engine}
+            [IO.File]::WriteAllText((Join-Path $InstallPath 'tts/engines.json'), ($engineRegistry | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
         }
 
         # Keep the installed runtime configuration alongside TTS.
@@ -432,7 +454,7 @@ try {
         Write-Host ''
         Write-Host "OpenCode configuration: $openCodeConfig"
         Write-Host ''
-        Write-Host 'Open a new Windows PowerShell window to use:'
+        Write-Host 'After refreshing PATH or reopening the terminal, use:'
         Write-Host '  agent'
         Write-Host '  agentdo'
         Write-Host '  localagent'
@@ -441,7 +463,7 @@ try {
 
     if ($Voice) {
         Write-Host ''
-        Write-Host 'Open a new Windows PowerShell window to use:'
+        Write-Host 'After refreshing PATH or reopening the terminal, use:'
         Write-Host '  tts-start'
         Write-Host '  tts-stop'
         Write-Host '  tts-status'
@@ -466,4 +488,5 @@ finally {
         try { Complete-StackInstallationTracking -Session $trackingSession -Succeeded $installationSucceeded }
         catch { Write-Warning "Ownership tracking is incomplete; uninstaller will retain unverified files: $($_.Exception.Message)" }
     }
+    if ($operationLock) { $operationLock.ReleaseMutex(); $operationLock.Dispose() }
 }

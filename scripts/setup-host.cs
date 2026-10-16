@@ -13,7 +13,7 @@ namespace WindowsHybridAgenticStack {
             Console.WriteLine("  --plan                 Preview selected components and destination");
             Console.WriteLine("  --check                Check selected prerequisites without installing");
             Console.WriteLine("  --cloud --local --voice Select components (default: bundled configuration)");
-            Console.WriteLine("  --tts-engine ID        Select a bundled TTS strategy (requires --voice)");
+            Console.WriteLine("  --tts-engine IDS       Comma-separated TTS engines; first is default (--voice)");
             Console.WriteLine("  --config PATH          Read JSON configuration overrides");
             Console.WriteLine("  --install-path PATH    Choose an installation destination");
             Console.WriteLine("  --install              Install selected cloud, local and voice components");
@@ -130,19 +130,26 @@ namespace WindowsHybridAgenticStack {
                     if (mode == "--plan") return 0;
                     if (mode == "--install") {
                         Hashtable arguments = new Hashtable { { "Cloud", (bool)selection[0].Properties["Cloud"].Value }, { "Local", (bool)selection[0].Properties["Local"].Value }, { "Voice", (bool)selection[0].Properties["Voice"].Value }, { "InstallPath", LanguagePrimitives.ConvertTo<string>(selection[0].Properties["InstallPath"].Value) }, { "Yes", yes }, { "PersistCommandPath", !noPath } };
+                        if ((bool)selection[0].Properties["Voice"].Value)
+                            arguments.Add("TtsEngine", LanguagePrimitives.ConvertTo<string>(selection[0].Properties["EngineSelection"].Value));
                         return SetupRuntime.Run("install.ps1", arguments, LanguagePrimitives.ConvertTo<string>(selection[0].Properties["ConfigJson"].Value));
                     }
-                    ps.Commands.Clear();
-                    ps.Streams.Error.Clear();
-                    ps.AddScript(SetupPayload.Prerequisites, true)
-                        .AddParameter("Cloud", (bool)selection[0].Properties["Cloud"].Value)
-                        .AddParameter("Local", (bool)selection[0].Properties["Local"].Value)
+                    string[] manifests = LanguagePrimitives.ConvertTo<string[]>(selection[0].Properties["StrategyManifestJsons"].Value);
+                    if (manifests == null || manifests.Length == 0) manifests = new string[] { null };
+                    for (int check = 0; check < manifests.Length; check++) {
+                        ps.Commands.Clear(); ps.Streams.Error.Clear();
+                        host.ExitRequested = false; host.ExitCode = 0;
+                        ps.AddScript(SetupPayload.Prerequisites, true)
+                        .AddParameter("Cloud", check == 0 && (bool)selection[0].Properties["Cloud"].Value)
+                        .AddParameter("Local", check == 0 && (bool)selection[0].Properties["Local"].Value)
                         .AddParameter("Voice", (bool)selection[0].Properties["Voice"].Value)
-                        .AddParameter("StrategyManifestJson", LanguagePrimitives.ConvertTo<string>(selection[0].Properties["StrategyManifestJson"].Value))
+                        .AddParameter("StrategyManifestJson", manifests[check])
                         .AddCommand("Out-Default");
-                    ps.Invoke();
-                    if (host.ExitRequested) return host.ExitCode;
-                    return ps.HadErrors ? 1 : 0;
+                        ps.Invoke();
+                        if (host.ExitRequested && host.ExitCode != 0) return host.ExitCode;
+                        if (ps.HadErrors) return 1;
+                    }
+                    return 0;
                 }
             }
         }

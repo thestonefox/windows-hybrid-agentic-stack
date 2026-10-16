@@ -1,10 +1,16 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 
 # Loading this helper has no side effects. Production registration changes
 # only the local app directory and the current user's PATH, never a profile.
 # Keep default registration outside AppData: packaged installer hosts may
 # redirect AppData writes into a private cache invisible to ordinary shells.
 $script:StackRegistrationSources = $PSScriptRoot
+
+if (-not (Get-Command Test-StackCommandNames -ErrorAction Ignore)) {
+    $stateHelper = Join-Path $PSScriptRoot 'installation-state.ps1'
+    if (Get-Command Get-StackSetupScript -ErrorAction Ignore) { . (Get-StackSetupScript $stateHelper) }
+    else { . $stateHelper }
+}
 
 function Set-StackUserCommandPath {
     param([string]$Directory, [switch]$Remove)
@@ -71,8 +77,7 @@ function Install-StackCommandRegistration {
     $statePath = Join-Path $directory 'commands.json'
     $source = Join-Path $script:StackRegistrationSources 'command-host.cs'
     $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
-    $names = @('agent','agentdo','localagent','localagentdo','tts-start','tts-stop','tts-status',
-        'tts-say','tts-voice-list','tts-voice-add','tts-voice-remove','tts-voice-test')
+    $names = @(Get-StackCommandNames)
     $previous = $null
     if (Test-Path -LiteralPath $statePath -PathType Leaf) {
         $previous = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -90,50 +95,64 @@ function Install-StackCommandRegistration {
     }
     $reuse = $null -ne $previous -and $previous.SourceSHA256 -ceq $sourceHash -and
         (Test-Path -LiteralPath (Join-Path $bin 'agent.exe') -PathType Leaf)
-    if ($reuse) { $built = Join-Path $bin 'agent.exe' }
-    else {
-        $buildDirectory = Join-Path ([IO.Path]::GetTempPath()) ('whas-command-build-' + [guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $buildDirectory -ErrorAction Stop | Out-Null
-        $built = Join-Path $buildDirectory 'command-host.exe'
-        Add-Type -Path $source -OutputAssembly $built -OutputType ConsoleApplication `
-            -ReferencedAssemblies ([System.Management.Automation.PSObject].Assembly.Location) -ErrorAction Stop
-    }
-    New-Item -ItemType Directory -Path $bin -Force -ErrorAction Stop | Out-Null
-    $executableHash = (Get-FileHash -LiteralPath $built -Algorithm SHA256).Hash
-    foreach ($name in $names) {
-        $destination = Join-Path $bin ($name + '.exe')
-        if (Test-Path -LiteralPath $destination -PathType Leaf) {
-            if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -ceq $executableHash) { continue }
-            Copy-Item -LiteralPath $destination -Destination ($destination + '.bak.' + [guid]::NewGuid().ToString('N'))
+    $buildDirectory = $null
+    try {
+        if ($reuse) { $built = Join-Path $bin 'agent.exe' }
+        else {
+            $buildDirectory = Join-Path ([IO.Path]::GetTempPath()) ('whas-command-build-' + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $buildDirectory -ErrorAction Stop | Out-Null
+            $built = Join-Path $buildDirectory 'command-host.exe'
+            Add-Type -Path $source -OutputAssembly $built -OutputType ConsoleApplication `
+                -ReferencedAssemblies ([System.Management.Automation.PSObject].Assembly.Location) -ErrorAction Stop
         }
-        Copy-Item -LiteralPath $built -Destination $destination -Force -ErrorAction Stop
-    }
-    $rootFile = Join-Path $bin 'install-root.txt'
-    if (-not (Test-Path -LiteralPath $rootFile -PathType Leaf) -or [IO.File]::ReadAllText($rootFile) -cne $root) {
-        if (Test-Path -LiteralPath $rootFile) {
-            Copy-Item -LiteralPath $rootFile -Destination ($rootFile + '.bak.' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $bin -Force -ErrorAction Stop | Out-Null
+        $executableHash = (Get-FileHash -LiteralPath $built -Algorithm SHA256).Hash
+        foreach ($name in $names) {
+            $destination = Join-Path $bin ($name + '.exe')
+            if (Test-Path -LiteralPath $destination -PathType Leaf) {
+                if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -ceq $executableHash) { continue }
+                Copy-Item -LiteralPath $destination -Destination ($destination + '.bak.' + [guid]::NewGuid().ToString('N'))
+            }
+            Copy-Item -LiteralPath $built -Destination $destination -Force -ErrorAction Stop
         }
-        [IO.File]::WriteAllText($rootFile, $root, (New-Object System.Text.UTF8Encoding($true)))
+        $rootFile = Join-Path $bin 'install-root.txt'
+        if (-not (Test-Path -LiteralPath $rootFile -PathType Leaf) -or [IO.File]::ReadAllText($rootFile) -cne $root) {
+            if (Test-Path -LiteralPath $rootFile) {
+                Copy-Item -LiteralPath $rootFile -Destination ($rootFile + '.bak.' + [guid]::NewGuid().ToString('N'))
+            }
+            [IO.File]::WriteAllText($rootFile, $root, (New-Object System.Text.UTF8Encoding($true)))
+        }
+        $pathAdded = $false
+        if ($PersistPath) { $pathAdded = Set-StackUserCommandPath -Directory $bin }
+        $state = [ordered]@{
+            SchemaVersion = 1
+            InstallPath = $root
+            SourceSHA256 = $sourceHash
+            ExecutableSHA256 = $executableHash
+            PathEntryAdded = $pathAdded -or ($null -ne $previous -and $previous.PathEntryAdded)
+            Commands = $names
+        }
+        $stateJson = $state | ConvertTo-Json -Depth 4
+        if (-not (Test-Path -LiteralPath $statePath -PathType Leaf) -or [IO.File]::ReadAllText($statePath) -cne $stateJson) {
+            [IO.File]::WriteAllText($statePath, $stateJson, (New-Object System.Text.UTF8Encoding($true)))
+        }
+        if (@($env:Path -split ';' | Where-Object { $_.TrimEnd('\') -ieq $bin.TrimEnd('\') }).Count -eq 0) {
+            $env:Path = $bin + ';' + $env:Path
+        }
+        Write-Host "Stack executable commands registered: $bin"
+        Write-Host 'Refresh PATH in your original terminal, or close and reopen the terminal application.'
     }
-    $pathAdded = $false
-    if ($PersistPath) { $pathAdded = Set-StackUserCommandPath -Directory $bin }
-    $state = [ordered]@{
-        SchemaVersion = 1
-        InstallPath = $root
-        SourceSHA256 = $sourceHash
-        ExecutableSHA256 = $executableHash
-        PathEntryAdded = $pathAdded -or ($null -ne $previous -and $previous.PathEntryAdded)
-        Commands = $names
+    finally {
+        if ($buildDirectory) {
+            $buildFull = [IO.Path]::GetFullPath($buildDirectory)
+            $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+            if (-not $buildFull.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -or
+                (Split-Path -Leaf $buildFull) -notmatch '^whas-command-build-[a-f0-9]{32}$') { throw 'Unexpected command build cleanup path.' }
+            $compiledFile = Join-Path $buildFull 'command-host.exe'
+            if (Test-Path -LiteralPath $compiledFile) { Remove-Item -LiteralPath $compiledFile -Force }
+            if ((Test-Path -LiteralPath $buildFull) -and @(Get-ChildItem -LiteralPath $buildFull -Force).Count -eq 0) { Remove-Item -LiteralPath $buildFull }
+        }
     }
-    $stateJson = $state | ConvertTo-Json -Depth 4
-    if (-not (Test-Path -LiteralPath $statePath -PathType Leaf) -or [IO.File]::ReadAllText($statePath) -cne $stateJson) {
-        [IO.File]::WriteAllText($statePath, $stateJson, (New-Object System.Text.UTF8Encoding($true)))
-    }
-    if (@($env:Path -split ';' | Where-Object { $_.TrimEnd('\') -ieq $bin.TrimEnd('\') }).Count -eq 0) {
-        $env:Path = $bin + ';' + $env:Path
-    }
-    Write-Host "Stack executable commands registered: $bin"
-    Write-Host 'Open a new terminal application to pick up the updated user PATH.'
 }
 
 function Unregister-StackCommands {
@@ -147,11 +166,8 @@ function Unregister-StackCommands {
     $state = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($state.SchemaVersion -ne 1) { throw 'Unknown command registration format; left untouched.' }
     $bin = Join-Path $directory 'bin'
-    $allowedNames = @('agent','agentdo','localagent','localagentdo','tts-start','tts-stop','tts-status',
-        'tts-say','tts-voice-list','tts-voice-add','tts-voice-remove','tts-voice-test')
-    if (@(Compare-Object -ReferenceObject $allowedNames -DifferenceObject @($state.Commands)).Count -gt 0) {
-        throw 'Unexpected registered command names; left untouched.'
-    }
+    if (-not (Test-StackCommandNames @($state.Commands))) { throw 'Unexpected registered command names; left untouched.' }
+    $allowedNames = @($state.Commands)
     $ownedFiles = @()
     foreach ($name in $allowedNames) {
         $file = Join-Path $bin ($name + '.exe')

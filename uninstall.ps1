@@ -18,6 +18,7 @@ param([string]$InstallPath, [switch]$Apply, [switch]$RetainManagedModels,
     [switch]$RemoveManagedModels,
     [bool]$PersistCommandPath = $true)
 $ErrorActionPreference = 'Stop'
+$operationLock = $null
 try {
     if ($RetainManagedModels -and $RemoveManagedModels) { throw 'Choose either -RetainManagedModels or -RemoveManagedModels, not both.' }
     if (-not ($null -ne ('WindowsHybridAgenticStack.SetupRuntime' -as [type]) -and [WindowsHybridAgenticStack.SetupRuntime]::IsHosting)) {
@@ -34,6 +35,7 @@ try {
         elseif (Test-Path -LiteralPath $registration) { $InstallPath = (Get-Content -LiteralPath $registration -Raw -Encoding UTF8 | ConvertFrom-Json).InstallPath }
         else { $InstallPath = Join-Path $HOME 'AI\WindowsHybridAgenticStack' }
     }
+    $operationLock = Enter-StackOperationLock $InstallPath
     $plan = Get-StackUninstallPlan -InstallPath $InstallPath -RemoveManagedModels:(-not $RetainManagedModels) -ShowProgress
     Write-Host "Installation: $($plan.Root)"
     Write-Host "Remove tracked files: $($plan.DeleteFiles.Count); restore original files: $($plan.RestoreFiles.Count)"
@@ -49,3 +51,4 @@ try {
     exit 0
 }
 catch { Write-Error "Uninstall failed: $($_.Exception.Message)" -ErrorAction Continue; exit 1 }
+finally { if ($operationLock) { $operationLock.ReleaseMutex(); $operationLock.Dispose() } }

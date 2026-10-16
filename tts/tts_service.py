@@ -38,7 +38,13 @@ def owned_path(root, relative):
 
 
 def load_backend(root):
-    runtime = json.loads((root / 'tts/runtime.json').read_text(encoding='utf-8-sig'))
+    selected = os.environ.get('AGENT_STACK_TTS_ENGINE')
+    if selected and not re.fullmatch(r'[a-z][a-z0-9-]{0,47}', selected):
+        raise ValueError('Invalid engine selection')
+    runtime_path = owned_path(root, f'tts/engines/{selected}/runtime.json') if selected else root / 'tts/runtime.json'
+    runtime = json.loads(runtime_path.read_text(encoding='utf-8-sig'))
+    if selected and runtime.get('engine') != selected:
+        raise ValueError('Selected engine differs from its runtime')
     if runtime.get('schemaVersion') != 1:
         raise ValueError('Unsupported TTS runtime schema')
     state = json.loads((root / '.whas-installation.json').read_text(encoding='utf-8-sig'))

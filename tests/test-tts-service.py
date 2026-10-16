@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('tts_service', REPO / 'tts/tts_service.py')
@@ -76,6 +77,27 @@ class StrategyServiceTests(unittest.TestCase):
         self.assertEqual(backend.list_voices(), ['default'])
         self.assertTrue(backend.synthesise('test', 'default').startswith(b'RIFF'))
         backend.close()
+
+    def test_explicit_engine_uses_its_runtime(self):
+        runtime_path = self.root / 'tts/engines/test-engine/runtime.json'
+        runtime_path.parent.mkdir(parents=True)
+        runtime_path.write_text(json.dumps(self.runtime), encoding='utf-8')
+        (self.root / 'tts/runtime.json').write_text('invalid legacy default', encoding='utf-8')
+        with patch.dict(os.environ, {'AGENT_STACK_TTS_ENGINE': 'test-engine'}):
+            backend, runtime = SERVICE.load_backend(self.root)
+            self.assertEqual(runtime['engine'], 'test-engine')
+            backend.close()
+
+    def test_invalid_or_mismatched_selection_rejected(self):
+        with patch.dict(os.environ, {'AGENT_STACK_TTS_ENGINE': '../escape'}):
+            with self.assertRaisesRegex(ValueError, 'Invalid engine selection'):
+                SERVICE.load_backend(self.root)
+        runtime_path = self.root / 'tts/engines/other-engine/runtime.json'
+        runtime_path.parent.mkdir(parents=True)
+        runtime_path.write_text(json.dumps(self.runtime), encoding='utf-8')
+        with patch.dict(os.environ, {'AGENT_STACK_TTS_ENGINE': 'other-engine'}):
+            with self.assertRaisesRegex(ValueError, 'Selected engine differs'):
+                SERVICE.load_backend(self.root)
 
     def test_modified_package_rejected_before_import(self):
         (self.root / self.runtime['backendPath']).write_text("raise AssertionError('must not execute')", encoding='utf-8')

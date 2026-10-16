@@ -167,6 +167,19 @@ try {
     Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $session.Root 'config\config.json'))) -ceq $userBytes) 'User edits made between installs restored'
     Write-Host 'PASS: Reinstallation retains user edits for later restoration'
 
+    $session = New-Fixture 'repeat-engine-runtime-change'
+    $runtimeFile = Join-Path $session.Root 'tts/engines/example/runtime.json'
+    Write-Fixture $runtimeFile '{"installed":"original runtime"}'
+    Complete-StackInstallationTracking $session $true
+    Write-Fixture $runtimeFile '{"user":"edited runtime between installs"}'
+    $runtimeBytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($runtimeFile))
+    $session = Start-StackInstallationTracking $session.Root
+    Write-Fixture $runtimeFile '{"installed":"replacement runtime"}'
+    Complete-StackInstallationTracking $session $true
+    Apply-Plan (Get-StackUninstallPlan $session.Root)
+    Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($runtimeFile)) -ceq $runtimeBytes) 'Edited per-engine runtime restored byte-for-byte after repeat installation'
+    Write-Host 'PASS: Reinstallation preserves edited per-engine runtime settings'
+
     $session = New-Fixture 'repeat-generated-cache'
     Complete-StackInstallationTracking $session $true
     Write-Fixture (Join-Path $session.Root '.venv\Lib\__pycache__\runtime.pyc') 'bytecode created between installs'

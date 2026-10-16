@@ -124,7 +124,7 @@ if (Test-Path -LiteralPath $runtimePath) {
         . (Join-Path $script:TtsServiceDir 'strategy-management.ps1')
     }
     $script:TtsRuntime = Get-Content -LiteralPath $runtimePath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($script:TtsRuntime.schemaVersion -ne 1 -or $script:TtsRuntime.engine -cne $script:TtsSettings.Engine) { throw 'TTS runtime and configured engine differ; reinstall the selected engine.' }
+    if ($script:TtsRuntime.schemaVersion -ne 1) { throw 'TTS runtime and configured engine differ; reinstall the selected engine.' }
     $script:TtsPython = Join-Path (Resolve-TtsPackagePath $script:TtsRoot $script:TtsRuntime.environmentPath) 'Scripts/python.exe'
     $script:TtsVoiceDirectory = Resolve-TtsPackagePath $script:TtsRoot $script:TtsRuntime.voicesPath
 }
@@ -139,6 +139,7 @@ $script:TtsDefaultVoice = $script:TtsSettings.DefaultVoice
 $script:TtsBaseUrl = "http://127.0.0.1:$script:TtsPort"
 
 function Get-TtsStatusResponse {
+    param([switch]$AnyEngine)
     try {
         $response = Invoke-RestMethod `
             -Uri "$script:TtsBaseUrl/status" `
@@ -148,7 +149,8 @@ function Get-TtsStatusResponse {
     catch {
         return $null
     }
-    if ($script:TtsRuntime -and ($response.engine -cne $script:TtsRuntime.engine -or $response.installation_root -ine $script:TtsRoot)) { throw 'Another service is using the configured speech port.' }
+    if ($script:TtsRuntime -and $response.installation_root -ine $script:TtsRoot) { throw 'Another service is using the configured speech port.' }
+    if (-not $AnyEngine -and $script:TtsRuntime -and $response.engine -cne $script:TtsRuntime.engine) { throw 'The active speech service does not match the selected engine.' }
     return $response
 }
 
@@ -185,7 +187,7 @@ function Get-TtsServiceProcess {
     return $processInfo
 }
 
-function tts-status {
+function Invoke-TtsStatusCore {
     $status = Get-TtsStatusResponse
 
     if ($null -ne $status) {
@@ -211,7 +213,7 @@ function tts-status {
     Write-Host 'TTS: STOPPED'
 }
 
-function tts-start {
+function Invoke-TtsStartCore {
     if ($null -ne (Get-TtsStatusResponse)) {
         Write-Host 'TTS is already running.'
         return
@@ -267,7 +269,8 @@ function tts-start {
         'AGENT_STACK_TTS_PORT',
         'AGENT_STACK_TTS_IDLE_SECONDS',
         'AGENT_STACK_TTS_DEVICE',
-        'AGENT_STACK_TTS_OWN_LOGS'
+        'AGENT_STACK_TTS_OWN_LOGS',
+        'AGENT_STACK_TTS_ENGINE'
     )
 
     $original = @{}
@@ -286,16 +289,21 @@ function tts-start {
             $script:TtsIdleMinutes * 60
         )
         $env:AGENT_STACK_TTS_DEVICE = $device
+        if ($script:TtsRuntime) {
+            $candidate = Join-Path $script:TtsServiceDir "engines/$($script:TtsRuntime.engine)/runtime.json"
+            if (Test-Path -LiteralPath $candidate) { $env:AGENT_STACK_TTS_ENGINE = $script:TtsRuntime.engine }
+            else { $env:AGENT_STACK_TTS_ENGINE = $null }
+        }
 
         if ($null -ne ('WindowsHybridAgenticStack.CommandHost' -as [type])) {
             $env:AGENT_STACK_TTS_OWN_LOGS = '1'
             $servicePid = [WindowsHybridAgenticStack.CommandHost]::StartBackgroundProcess(
-                $script:TtsPython, ('-u "' + $script:TtsServiceFile + '"'), $script:TtsServiceDir)
+                $script:TtsPython, ('-B -u "' + $script:TtsServiceFile + '"'), $script:TtsServiceDir)
         }
         else {
             $process = Start-Process `
             -FilePath $script:TtsPython `
-            -ArgumentList ('-u "' + $script:TtsServiceFile + '"') `
+            -ArgumentList ('-B -u "' + $script:TtsServiceFile + '"') `
             -WorkingDirectory $script:TtsServiceDir `
             -WindowStyle Hidden `
             -RedirectStandardOutput (
@@ -327,7 +335,7 @@ function tts-start {
     }
 }
 
-function tts-stop {
+function Invoke-TtsStopCore {
     $process = Get-TtsServiceProcess
 
     if ($null -eq $process) {
@@ -359,7 +367,7 @@ function Wait-TtsReady {
     }
 
     if ($null -eq (Get-TtsServiceProcess)) {
-        tts-start
+        Invoke-TtsStartCore
     }
 
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -448,7 +456,7 @@ function Get-TtsWavDurationSeconds {
     }
 }
 
-function tts-say {
+function Invoke-TtsSayCore {
     param(
         [Parameter(Position = 0, Mandatory = $true)]
         [string]$Text,
@@ -502,7 +510,7 @@ function tts-say {
     }
 }
 
-function tts-voice-list {
+function Invoke-TtsVoiceListCore {
     if ($script:TtsRuntime) {
         if (-not (Wait-TtsReady)) { Write-Error 'The selected speech engine is not ready.'; return }
         try {
@@ -531,7 +539,7 @@ function tts-voice-list {
         ForEach-Object { Write-Host $_ }
 }
 
-function tts-voice-add {
+function Invoke-TtsVoiceAddCore {
     param(
         [Parameter(Position = 0, Mandatory = $true)]
         [string]$Path,
@@ -590,10 +598,11 @@ function tts-voice-add {
     }
 }
 
-function tts-voice-remove {
+function Invoke-TtsVoiceRemoveCore {
     param(
         [Parameter(Position = 0, Mandatory = $true)]
-        [string]$Name
+        [string]$Name,
+        [switch]$Confirmed
     )
 
     if ($script:TtsRuntime -and -not $script:TtsRuntime.capabilities.voiceCloning) { Write-Error 'The selected engine does not support reference-recording voices.'; return }
@@ -608,13 +617,14 @@ function tts-voice-remove {
         return
     }
 
-    $confirmation = Read-Host (
-        "Delete voice '$Name' and its reference WAV? Type YES"
-    )
-
-    if ($confirmation -cne 'YES') {
-        Write-Host 'Cancelled.'
-        return
+    if (-not $Confirmed) {
+        $confirmation = Read-Host (
+            "Delete voice '$Name' and its reference WAV? Type YES"
+        )
+        if ($confirmation -cne 'YES') {
+            Write-Host 'Cancelled.'
+            return
+        }
     }
 
     if (-not (Wait-TtsReady)) {
@@ -642,13 +652,33 @@ function tts-voice-remove {
     }
 }
 
-function tts-voice-test {
+function Invoke-TtsVoiceTestCore {
     param(
         [Parameter(Position = 0, Mandatory = $true)]
         [string]$Name
     )
 
-    tts-say `
+    Invoke-TtsSayCore `
         -Text 'Hello! This is a test of my TTS voice.' `
         -Voice $Name
+}
+
+# Keep legacy source fixtures/layouts usable; installed multi-engine commands
+# load the ownership-checked manager through the native application host.
+$managerPath = Join-Path $script:TtsServiceDir 'engine-management.ps1'
+if (Test-Path -LiteralPath $managerPath) {
+    if (-not (Get-Command Get-StackSetupScript -ErrorAction Ignore)) {
+        . (Join-Path $script:TtsRoot 'scripts/script-invocation.ps1')
+    }
+    . (Get-StackSetupScript $managerPath)
+}
+else {
+    Set-Item -LiteralPath 'Function:tts-start' -Value ${function:Invoke-TtsStartCore}
+    Set-Item -LiteralPath 'Function:tts-stop' -Value ${function:Invoke-TtsStopCore}
+    Set-Item -LiteralPath 'Function:tts-status' -Value ${function:Invoke-TtsStatusCore}
+    Set-Item -LiteralPath 'Function:tts-say' -Value ${function:Invoke-TtsSayCore}
+    Set-Item -LiteralPath 'Function:tts-voice-list' -Value ${function:Invoke-TtsVoiceListCore}
+    Set-Item -LiteralPath 'Function:tts-voice-add' -Value ${function:Invoke-TtsVoiceAddCore}
+    Set-Item -LiteralPath 'Function:tts-voice-remove' -Value ${function:Invoke-TtsVoiceRemoveCore}
+    Set-Item -LiteralPath 'Function:tts-voice-test' -Value ${function:Invoke-TtsVoiceTestCore}
 }

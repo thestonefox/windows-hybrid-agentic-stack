@@ -42,7 +42,11 @@ function Get-StackUninstallPlan {
     $verifyProgress = New-StackOperationProgress 'Verifying installation ownership' -Enabled:$ShowProgress
     $verifiedCount = 0
     foreach ($relative in $tree.Files) {
-        Write-StackOperationProgress $verifyProgress -Completed $verifiedCount -Total $tree.Files.Count
+        if ($verifyProgress) {
+            $verifyProgress.Completed = $verifiedCount
+            $verifyProgress.Total = $tree.Files.Count
+            if ($verifyProgress.Timer.ElapsedMilliseconds - $verifyProgress.LastUpdate -ge 2000) { Write-StackOperationProgress $verifyProgress }
+        }
         $verifiedCount++
         if ($relative -eq '.whas-installation.json') { continue }
         $path = Resolve-StackOwnedPath $root $relative
@@ -80,8 +84,8 @@ function Get-StackUninstallPlan {
         $null = Get-StackInstallationTree -Root $registration
         $commands = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
         if ($commands.InstallPath -ieq $root) {
-            $allowed = @('agent','agentdo','localagent','localagentdo','tts-start','tts-stop','tts-status','tts-say','tts-voice-list','tts-voice-add','tts-voice-remove','tts-voice-test')
-            if ($commands.SchemaVersion -ne 1 -or @(Compare-Object $allowed @($commands.Commands)).Count -gt 0) { throw 'Invalid command registration; no changes made.' }
+            if ($commands.SchemaVersion -ne 1 -or -not (Test-StackCommandNames @($commands.Commands))) { throw 'Invalid command registration; no changes made.' }
+            $allowed = @($commands.Commands)
             $bin = Join-Path $registration 'bin'
             if ([IO.File]::ReadAllText((Join-Path $bin 'install-root.txt')) -cne $root) { throw 'Local command root changed; no changes made.' }
             foreach ($name in $allowed) {
@@ -98,7 +102,11 @@ function Get-StackUninstallPlan {
                 if ($previousRoot -ine $root -and (Test-Path -LiteralPath (Join-Path $previousRoot '.whas-installation.json'))) {
                     if ((Read-StackInstallationState $previousRoot).Status -eq 'Uninstalled') { $exists = $false }
                 }
-                $expectedFiles = @('commands.json','bin/install-root.txt') + @($allowed | ForEach-Object { 'bin/' + $_ + '.exe' })
+                $previousCommandsFile = @($previous.Files | Where-Object Path -ceq 'commands.json')
+                if ($previousCommandsFile.Count -ne 1) { throw 'Missing previous command registration.' }
+                $previousCommands = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($previousCommandsFile[0].Base64)).TrimStart([char]0xfeff) | ConvertFrom-Json
+                if (-not (Test-StackCommandNames @($previousCommands.Commands))) { throw 'Unknown previous command names.' }
+                $expectedFiles = @('commands.json','bin/install-root.txt') + @($previousCommands.Commands | ForEach-Object { 'bin/' + $_ + '.exe' })
                 if (@(Compare-Object $expectedFiles @($previous.Files.Path)).Count -gt 0) { throw 'Invalid previous-registration backup paths.' }
                 foreach ($entry in $previous.Files) {
                     $null = Resolve-StackOwnedPath $registration $entry.Path
@@ -116,7 +124,7 @@ function Get-StackUninstallPlan {
             $expectedPath = if ($state.OriginalUserPath.Value.Length -eq 0) { $bin } else { $state.OriginalUserPath.Value + ';' + $bin }
             $plan.RestoreUserPathExactly = $commands.PathEntryAdded -and $path.Value -ceq $expectedPath
             foreach ($backup in $state.RegistrationBackups) {
-                if ($backup.Name -notmatch '^(agent|agentdo|localagent|localagentdo|tts-(start|stop|status|say|voice-(list|add|remove|test)))\.exe\.bak\.[a-f0-9]{32}$|^install-root\.txt\.bak\.[a-f0-9]{32}$') { throw 'Invalid registration backup name.' }
+                if ($backup.Name -notmatch '^(agent|agentdo|localagent|localagentdo|tts-(start|stop|status|say|voice-(list|add|remove|test)|engine-(list|install|uninstall|default)))\.exe\.bak\.[a-f0-9]{32}$|^install-root\.txt\.bak\.[a-f0-9]{32}$') { throw 'Invalid registration backup name.' }
                 $file = Join-Path $bin $backup.Name
                 if ((Test-Path -LiteralPath $file) -and (Get-StackFileSHA256 $file) -ceq $backup.SHA256) { $plan.RegistrationBackups += $backup }
             }
@@ -166,6 +174,12 @@ function Stop-StackOwnedSpeech {
             throw 'Speech worker has no verified launcher PID; stop it before uninstalling.'
         }
         return
+    }
+    if ($state.SchemaVersion -eq 2) {
+        $allowedPythons = @($state.TtsStrategies | ForEach-Object {
+            Join-Path (Resolve-StackOwnedPath $Root $_.Context.EnvironmentPath) 'Scripts/python.exe'
+        })
+        if ($allowedPythons -icontains $launcher[0].ExecutablePath) { $pythonPath = $launcher[0].ExecutablePath }
     }
     if ($launcher[0].Name -notmatch '^python(w)?\.exe$' -or -not $launcher[0].CommandLine.Contains($marker) -or
         $launcher[0].ExecutablePath -ine $pythonPath) { throw 'Saved PID belongs to another process; it was not stopped.' }
@@ -269,12 +283,16 @@ function Invoke-StackUninstall {
             if ((Get-StackFileSHA256 $path -Progress $fileProgress) -cne $entry.SHA256) { throw "File changed during uninstall: $path" }
             [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($entry.Original.Base64))
             $receipt.RestoredFiles += $entry.Path
-            Write-StackOperationProgress $fileProgress -Completed $receipt.RestoredFiles.Count -Total $current.RestoreFiles.Count
+            if ($fileProgress.Timer.ElapsedMilliseconds - $fileProgress.LastUpdate -ge 2000) {
+                Write-StackOperationProgress $fileProgress -Completed $receipt.RestoredFiles.Count -Total $current.RestoreFiles.Count
+            }
         }
         Write-StackOperationProgress $fileProgress -Completed $receipt.RestoredFiles.Count -Total $current.RestoreFiles.Count -Force
         $fileProgress = New-StackOperationProgress 'Removing tracked files' -Enabled
         foreach ($entry in $current.DeleteFiles) {
-            Write-StackOperationProgress $fileProgress -Completed $receipt.DeletedFiles.Count -Total $current.DeleteFiles.Count
+            $fileProgress.Completed = $receipt.DeletedFiles.Count
+            $fileProgress.Total = $current.DeleteFiles.Count
+            if ($fileProgress.Timer.ElapsedMilliseconds - $fileProgress.LastUpdate -ge 2000) { Write-StackOperationProgress $fileProgress }
             $path = Resolve-StackOwnedPath $current.Root $entry.Path
             if ((Get-StackFileSHA256 $path -Progress $fileProgress) -cne $entry.SHA256) { throw "File changed during uninstall: $path" }
             Remove-Item -LiteralPath $path -Force -ErrorAction Stop
@@ -289,7 +307,9 @@ function Invoke-StackUninstall {
             $directory = Resolve-StackOwnedPath $current.Root $relative
             if ((Test-Path -LiteralPath $directory -PathType Container) -and @(Get-ChildItem -LiteralPath $directory -Force).Count -eq 0) { Remove-Item -LiteralPath $directory -ErrorAction Stop }
             $directoryCount++
-            Write-StackOperationProgress $directoryProgress -Completed $directoryCount -Total $directories.Count
+            if ($directoryProgress.Timer.ElapsedMilliseconds - $directoryProgress.LastUpdate -ge 2000) {
+                Write-StackOperationProgress $directoryProgress -Completed $directoryCount -Total $directories.Count
+            }
         }
         Write-StackOperationProgress $directoryProgress -Completed $directoryCount -Total $directories.Count -Force
         $left = Get-StackInstallationTree -Root $current.Root -Progress (New-StackOperationProgress 'Checking remaining files' -Enabled)

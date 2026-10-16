@@ -168,6 +168,18 @@
           }
         ]
       }
+    },
+    "voiceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transcriptRequired"
+      ],
+      "properties": {
+        "transcriptRequired": {
+          "type": "boolean"
+        }
+      }
     }
   }
 }

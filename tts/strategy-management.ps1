@@ -22,7 +22,7 @@ function Read-TtsStrategy {
     if ((Get-Item -LiteralPath $manifestPath).Length -gt 64KB) { throw 'Strategy manifest is too large.' }
     $m = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $required = @('schemaVersion','apiVersion','id','version','name','description','platforms','devices','prerequisites','capabilities','entrypoints','files','license','models')
-    if ($m -isnot [pscustomobject] -or @(Compare-Object ($required | Sort-Object) @($m.PSObject.Properties.Name | Sort-Object)).Count) { throw 'Invalid strategy manifest fields.' }
+    if ($m -isnot [pscustomobject] -or @($required | Where-Object { $_ -notin $m.PSObject.Properties.Name }).Count -or @($m.PSObject.Properties.Name | Where-Object { $_ -notin ($required + @('voiceReference')) }).Count) { throw 'Invalid strategy manifest fields.' }
     if (($m.schemaVersion -isnot [int] -and $m.schemaVersion -isnot [long]) -or
         ($m.apiVersion -isnot [int] -and $m.apiVersion -isnot [long]) -or $m.schemaVersion -ne 1 -or $m.apiVersion -ne 1) { throw 'Unsupported TTS strategy schema/API version.' }
     if ($m.id -isnot [string] -or $m.version -isnot [string] -or $m.id -cnotmatch '^[a-z][a-z0-9-]{0,47}$' -or (Split-Path $Directory -Leaf) -cne $m.id -or
@@ -35,6 +35,11 @@ function Read-TtsStrategy {
         @($m.devices | Select-Object -Unique).Count -ne $m.devices.Count) { throw 'Unsupported or duplicate strategy device.' }
     if ($m.prerequisites.python -isnot [string] -or $m.prerequisites.python -notmatch '^3\.\d+$' -or $m.prerequisites.visualCpp -isnot [bool]) { throw 'Invalid Python/Visual C++ prerequisites.' }
     foreach ($cap in @('builtinVoice','voiceCloning')) { if ($m.capabilities.$cap -isnot [bool]) { throw "Invalid capability: $cap" } }
+    if ($m.PSObject.Properties.Name -contains 'voiceReference') {
+        if ($m.voiceReference -isnot [pscustomobject] -or
+            @(Compare-Object @('transcriptRequired') @($m.voiceReference.PSObject.Properties.Name)).Count -or
+            $m.voiceReference.transcriptRequired -isnot [bool] -or -not $m.capabilities.voiceCloning) { throw 'Invalid voice reference requirements.' }
+    }
     if ($m.files -isnot [array] -or $m.files.Count -eq 0) { throw 'Strategy files must be an explicit list.' }
     $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($file in $m.files) {
@@ -90,11 +95,17 @@ function Select-TtsEngine {
     for ($i=0; $i -lt $Manifests.Count; $i++) {
         Write-Host ("{0}. {1}: {2}" -f ($i+1), $Manifests[$i].name, $Manifests[$i].description)
     }
-    $choice = Read-Host "Speech engine [default: $Default]"
+    $choice = Read-Host "Speech engines: numbers separated by commas; first is default [default: $Default]"
     if (-not $choice) { return $Default }
-    $number = 0
-    if (-not [int]::TryParse($choice, [ref]$number) -or $number -lt 1 -or $number -gt $Manifests.Count) { throw 'Invalid engine selection.' }
-    return $Manifests[$number-1].id
+    $selected = @()
+    foreach ($part in $choice.Split(',')) {
+        $number = 0
+        if (-not [int]::TryParse($part.Trim(), [ref]$number) -or $number -lt 1 -or $number -gt $Manifests.Count) { throw 'Invalid engine selection.' }
+        $id = $Manifests[$number-1].id
+        if ($selected -contains $id) { throw 'Duplicate engine selection.' }
+        $selected += $id
+    }
+    return ($selected -join ',')
 }
 
 function Invoke-TtsVerifiedHook {
@@ -104,6 +115,10 @@ function Invoke-TtsVerifiedHook {
         $result = [WindowsHybridAgenticStack.SetupRuntime]::InvokeVerifiedScript($Path, $SHA256, $Arguments)
         if ($result.ExitCode -ne 0) { throw "Strategy hook failed (exit $($result.ExitCode))." }
         foreach ($item in $result.Output) { $item }
+    }
+    elseif ($null -ne ('WindowsHybridAgenticStack.CommandHost' -as [type]) -and [WindowsHybridAgenticStack.CommandHost]::ManagedRoot) {
+        Invoke-StackSetupScript -Path $Path -Arguments $Arguments
+        if ($LASTEXITCODE -ne 0) { throw "Strategy hook failed (exit $LASTEXITCODE)." }
     }
     else {
         & $Path @Arguments

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "apiVersion": 1,
   "id": "f5-tts",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "F5-TTS",
   "description": "Reference-conditioned speech on CPU or CUDA; pretrained weights are noncommercial. Custom WAV voices need a matching transcript.",
   "platforms": [
@@ -74,5 +74,8 @@
       "sha256": "5858497d76d58914b29958a0f448e7b4fd3bb54940100baaa7520d4a56d8b3df",
       "license": "MIT"
     }
-  ]
+  ],
+  "voiceReference": {
+    "transcriptRequired": true
+  }
 }

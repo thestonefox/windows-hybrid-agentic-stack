@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 # Isolated tests: no persistent PATH/policy changes or real profile writes.
 [CmdletBinding()]
 param()
@@ -79,15 +79,15 @@ public static class FakeOpenCode {
     $env:WHAS_TEST_ARGUMENTS = Join-Path $testRoot 'received-arguments.txt'
     Install-StackCommandRegistration -InstallPath $rootA -RegistrationDirectory (Join-Path $localA 'WindowsHybridAgenticStack') -PersistPath $false
     $commands = @(Get-Command agent,agentdo,localagent,localagentdo,tts-start,tts-stop,tts-status,
-        tts-say,tts-voice-list,tts-voice-add,tts-voice-remove,tts-voice-test -CommandType Application)
-    Assert-True ($commands.Count -eq 12) 'All 12 executable names discovered'
+        tts-say,tts-voice-list,tts-voice-add,tts-voice-remove,tts-voice-test,tts-engine-list,tts-engine-install,tts-engine-uninstall,tts-engine-default -CommandType Application)
+    Assert-True ($commands.Count -eq 16) 'All 16 executable names discovered'
     $beforeFiles = @(Get-ChildItem -LiteralPath (Join-Path $localA 'WindowsHybridAgenticStack') -Recurse -File |
         Select-Object FullName,LastWriteTimeUtc,Length) | ConvertTo-Json -Compress
     Install-StackCommandRegistration -InstallPath $rootA -RegistrationDirectory (Join-Path $localA 'WindowsHybridAgenticStack') -PersistPath $false
     $afterFiles = @(Get-ChildItem -LiteralPath (Join-Path $localA 'WindowsHybridAgenticStack') -Recurse -File |
         Select-Object FullName,LastWriteTimeUtc,Length) | ConvertTo-Json -Compress
     Assert-True ($beforeFiles -ceq $afterFiles) 'Repeat registration leaves files/timestamps unchanged'
-    Write-Host 'PASS: All 12 native entry points; custom root and idempotence'
+    Write-Host 'PASS: All 16 native entry points; custom root and idempotence'
     $result = Invoke-Restricted @'
 $ErrorActionPreference='Stop'
 if ((Get-ExecutionPolicy) -ne 'Restricted') { throw 'Test policy not Restricted' }

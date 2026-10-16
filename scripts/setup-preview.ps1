@@ -34,14 +34,23 @@ if ($InstallPath -match '^\$HOME(?=[\\/]|$)') { $InstallPath = $HOME + $InstallP
 $InstallPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallPath)
 $config.installation.directory = $InstallPath
 if ($TtsEngine -and -not $Voice) { throw '--tts-engine requires --voice.' }
-if ($TtsEngine) { $config.tts.engine = $TtsEngine }
+if ($TtsEngine) { $engineIds = @($TtsEngine.Split(',') | ForEach-Object { $_.Trim() }); $config.tts.engine = $engineIds[0] } else { $engineIds = @($config.tts.engine) }
 $engineManifest = $null
 if ($Voice) {
     $catalog = $StrategyCatalogJson | ConvertFrom-Json
     if ($Interactive -and -not $TtsEngine -and -not $ConfigPath) {
-        $config.tts.engine = Select-TtsEngine -Manifests @($catalog | ForEach-Object { $_ }) -Default $config.tts.engine
+        $engineIds = @((Select-TtsEngine -Manifests @($catalog | ForEach-Object { $_ }) -Default $config.tts.engine).Split(','))
+        $config.tts.engine = $engineIds[0]
     }
-    $selectedManifests = @($catalog | Where-Object { $_.id -ceq $config.tts.engine })
+    if (@($engineIds | Select-Object -Unique).Count -ne $engineIds.Count) { throw 'Duplicate engine selection.' }
+    $allManifests = @()
+    foreach ($engineId in $engineIds) {
+        $matches = @($catalog | Where-Object { $_.id -ceq $engineId })
+        if ($matches.Count -ne 1) { throw "TTS strategy unavailable: $engineId" }
+        if ($config.tts.device -ne 'auto' -and $config.tts.device -notin $matches[0].devices) { throw 'Device unsupported by selected strategy.' }
+        $allManifests += $matches[0]
+    }
+    $selectedManifests = @($allManifests | Select-Object -First 1)
     if ($selectedManifests.Count -ne 1) { throw "TTS strategy unavailable: $($config.tts.engine)" }
     $engineManifest = $selectedManifests[0]
     if ($config.tts.device -ne 'auto' -and $config.tts.device -notin $engineManifest.devices) { throw 'Device unsupported by selected strategy.' }
@@ -58,14 +67,17 @@ if ($ShowPlan) {
         Write-Host "Context:      $($config.agents.local.contextSize) tokens"
     }
     if ($Voice) {
-        Write-Host "TTS engine:   $($config.tts.engine)"
+        Write-Host "TTS engines:  $($engineIds -join ',')"
+        Write-Host "Default TTS:  $($config.tts.engine)"
         Write-Host "TTS device:   $($config.tts.device)"
-        Write-Host "TTS package:  $($engineManifest.name) $($engineManifest.version); licence: $($engineManifest.license)"
-        foreach ($model in $engineManifest.models) {
-            $pin = if ($model.revision) { "revision $($model.revision)" } else { "SHA256 $($model.sha256)" }
-            Write-Host "Model download: $($model.source), $pin; licence: $($model.license)"
+        foreach ($manifest in $allManifests) {
+            Write-Host "TTS package:  $($manifest.name) $($manifest.version); licence: $($manifest.license)"
+            foreach ($model in $manifest.models) {
+                $pin = if ($model.revision) { "revision $($model.revision)" } else { "SHA256 $($model.sha256)" }
+                Write-Host "Model download: $($model.source), $pin; licence: $($model.license)"
+            }
         }
     }
     Write-Host 'Preview complete. No changes made.'
 }
-[pscustomobject]@{ Cloud = $Cloud; Local = $Local; Voice = $Voice; InstallPath = $InstallPath; StrategyManifestJson = ($engineManifest | ConvertTo-Json -Depth 12 -Compress); ConfigJson = ($config | ConvertTo-Json -Depth 50) }
+[pscustomobject]@{ EngineSelection=($engineIds -join ','); StrategyManifestJsons=@($allManifests | ForEach-Object { $_ | ConvertTo-Json -Depth 12 -Compress }); Cloud = $Cloud; Local = $Local; Voice = $Voice; InstallPath = $InstallPath; StrategyManifestJson = ($engineManifest | ConvertTo-Json -Depth 12 -Compress); ConfigJson = ($config | ConvertTo-Json -Depth 50) }
