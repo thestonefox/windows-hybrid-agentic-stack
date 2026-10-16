@@ -161,3 +161,11 @@ Follow [Missing stack commands](#missing-stack-commands) above to inspect the lo
 The published `resemble-perth==1.0.1` package requires `pkg_resources`. In the reference-machine investigation, setuptools 84.0.0 failed to supply it, while setuptools 80.9.0 allowed the Perth import to succeed. A failed import may surface as `ModuleNotFoundError: No module named 'pkg_resources'` or later as `TypeError: 'NoneType' object is not callable`.
 
 The TTS installer constrains setuptools to `<81` inside its isolated virtual environment and verifies the actual Perth watermarking implementation. Keep this compatibility constraint when maintaining dependencies. Global Python and Whisper do not need modification. Check the stack's `tts\service-errors.log` for the underlying import error before diagnosing another cause.
+
+## F5-TTS strategy
+
+Select `f5-tts` explicitly; Chatterbox remains the default. Use Python 3.11 x64 and the Visual C++ x64 runtime. F5 weights are CC-BY-NC-4.0, so this bundled model is for noncommercial use only. CPU installation uses CPU PyTorch; CUDA uses the pinned CUDA 12.6 build and needs a compatible NVIDIA driver. Do not change global Python packages or execution policy to repair an installation.
+
+Custom voices require a mono 3-12 second WAV and a matching UTF-8 `.txt` transcript beside it. The transcript must contain the words actually spoken. Missing transcripts are rejected rather than automatically downloading an ASR model. List/remove commands manage the installed WAV/text pair. Main uninstall preserves personal voices.
+
+A model hash mismatch preserves the existing file and stops installation. Review it or choose a fresh installation directory; do not edit ownership hashes or disable certificate verification. Runtime inference uses local models only. CPU generation can take substantially longer than Piper. The native speech command waits up to 180 seconds per request; use shorter text or CUDA for long responses. Inspect the private service logs for an actual failure before treating slow inference as an install failure.

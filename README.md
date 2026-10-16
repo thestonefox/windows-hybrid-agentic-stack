@@ -2,7 +2,7 @@
 
 A configurable Windows AI agent toolkit combining local language models, cloud AI models, agent orchestration, and local text-to-speech.
 
-The project provides PowerShell commands for interacting with cloud and local AI agents, running agent-assisted tasks, and optionally speaking responses using Chatterbox Turbo or Piper TTS.
+The project provides PowerShell commands for interacting with cloud and local AI agents, running agent-assisted tasks, and optionally speaking responses using Chatterbox Turbo, Piper TTS or F5-TTS.
 
 > **Development status:** Native command registration passed a live Windows 11 installation test, fresh-terminal command discovery, cloud/local inference and CUDA speech, with both responses confirmed audible. Profiles and execution policies remained unchanged. Isolated Windows PowerShell 5.1 tests also pass under Restricted. Controlled rollback also passed: exact user PATH, profile state, policies and original model digests matched the baseline. The user also confirmed that a second physical PC starts PowerShell without profile errors.
 
@@ -13,7 +13,7 @@ The stack combines four components:
 - **Local AI — [Ollama](https://ollama.com/):** Run language models locally.
 - **Cloud AI — OpenCode providers:** Access your chosen cloud provider through OpenCode.
 - **Agent orchestration — [OpenCode](https://opencode.ai/):** Run AI agents with separate read-only and write-capable permissions.
-- **Text-to-speech — [Chatterbox](https://github.com/resemble-ai/chatterbox) or [Piper](https://github.com/OHF-Voice/piper1-gpl):** Generate speech locally with the selected engine. Chatterbox also supports custom voice profiles.
+- **Text-to-speech — [Chatterbox](https://github.com/resemble-ai/chatterbox), [Piper](https://github.com/OHF-Voice/piper1-gpl) or [F5-TTS](https://github.com/SWivid/F5-TTS):** Generate speech locally with the selected engine. Chatterbox supports reference-WAV voices; F5 also requires a transcript.
 
 Components can be installed independently or in combination.
 
@@ -24,8 +24,8 @@ The project supports:
 - Four PowerShell agent commands.
 - Read-only and write-capable agent modes.
 - Optional spoken agent responses.
-- Custom Chatterbox voice profiles.
-- CPU speech with either engine, plus automatic CPU/NVIDIA CUDA selection for Chatterbox.
+- Custom Chatterbox voice profiles and F5 WAV-plus-transcript voices.
+- CPU speech with all three engines, plus automatic CPU/NVIDIA CUDA selection for Chatterbox and F5.
 - On-demand TTS service startup and configured idle shutdown.
 - Stack-specific OpenCode configuration.
 - Isolated Python environments for the selected TTS strategy.
@@ -46,7 +46,7 @@ You only need the prerequisites for the components you intend to install.
 
 Cloud-only agents do not require Python or Ollama. Voice-only installation does not require OpenCode or Ollama.
 
-The project installer manages the selected TTS strategy's private Python environment, model and dependencies: PyTorch for Chatterbox, or CPU ONNX Runtime for Piper. External applications such as Python, OpenCode, and Ollama must be installed separately.
+The project installer manages the selected TTS strategy's private Python environment, model and dependencies: PyTorch for Chatterbox/F5, or CPU ONNX Runtime for Piper. External applications such as Python, OpenCode, and Ollama must be installed separately.
 
 ## Installing prerequisites
 
@@ -68,7 +68,7 @@ Windows Sandbox may require additional WinGet setup.
 
 ### 2. Install Python 3.11 (TTS only)
 
-Chatterbox requires a compatible Python installation. The project's tested reference is **64-bit Python 3.11**.
+The bundled TTS strategies require a compatible Python installation. The project's tested reference is **64-bit Python 3.11**.
 
 Install it using:
 
@@ -90,11 +90,11 @@ py -0p
 
 The TTS installer uses Python 3.11 to create a separate virtual environment inside the selected stack installation directory.
 
-It does not install Chatterbox packages into your global Python installation.
+It does not install TTS packages into your global Python installation.
 
 ### 3. Install Microsoft Visual C++ Redistributable (TTS only)
 
-**Microsoft Visual C++ Redistributable 2015–2022 (x64) is required for Chatterbox Turbo on Windows.**
+**Microsoft Visual C++ Redistributable 2015–2022 (x64) is required for the bundled TTS strategies on Windows.**
 
 This applies to both CPU-only and CUDA-enabled installations.
 
@@ -117,7 +117,7 @@ OSError: [WinError 126] The specified module could not be found.
 Error loading torch\lib\c10.dll or one of its dependencies.
 ```
 
-Install the redistributable, reopen PowerShell if necessary, and retry the Chatterbox installer.
+Install the redistributable, reopen PowerShell if necessary, and retry the selected TTS installer.
 
 **The full Visual Studio IDE, C++ build tools, and a separate CUDA Toolkit are not required for the precompiled PyTorch packages used by this installer.**
 
@@ -187,7 +187,7 @@ The installer leaves OpenCode model selection unchanged by default. It does not 
 
 ### 7. NVIDIA GPU drivers (optional TTS acceleration)
 
-Chatterbox can use CPU-only PyTorch or CUDA-enabled PyTorch.
+Chatterbox and F5 can use CPU-only PyTorch or CUDA-enabled PyTorch. Piper uses CPU ONNX Runtime.
 
 For GPU acceleration, install a compatible NVIDIA graphics driver.
 
@@ -481,9 +481,9 @@ Depending on the selected components, the installer:
 - Installs Windows PowerShell 5.1-specific agent instructions without discarding existing instructions.
 - Installs `ps-read` and `ps-write` agent permissions.
 - Registers PowerShell agent commands.
-- Creates an isolated Python 3.11 environment for Chatterbox.
-- Automatically selects CPU or CUDA PyTorch when TTS is selected.
-- Installs Chatterbox Turbo and its Python dependencies.
+- Creates an isolated Python 3.11 environment for the selected TTS strategy.
+- Selects supported CPU/CUDA execution for the chosen TTS strategy.
+- Installs the selected TTS engine and its pinned dependencies and models.
 - Verifies Python package compatibility and key package versions.
 - Copies TTS service and command files into the installation directory.
 - Registers native agent and TTS commands through the local user PATH.
@@ -817,7 +817,7 @@ List available voices:
 tts-voice-list
 ```
 
-Create a custom voice from a suitable WAV recording (Chatterbox only; Piper uses its pre-trained voice):
+Create a custom voice from a suitable WAV recording (Chatterbox; F5 also needs a matching transcript as described in [TTS strategies](docs/tts-strategies.md); Piper uses its pre-trained voice):
 
 ```powershell
 tts-voice-add -Path 'C:\VoiceSamples\sample.wav' -Name 'myvoice'
@@ -843,18 +843,20 @@ The built-in `default` voice is reserved and cannot be removed.
 
 ## TTS engine strategies
 
-Chatterbox Turbo and Piper TTS are bundled strategies. TTS packages are discovered from `tts/strategies/<id>/`; additional trusted packages can supply their own installation, backend and uninstall behavior. Source and standalone setup support explicit engine selection:
+Chatterbox Turbo, Piper TTS and F5-TTS are bundled strategies. TTS packages are discovered from `tts/strategies/<id>/`; additional trusted packages can supply their own installation, backend and uninstall behavior. Source and standalone setup support explicit engine selection:
 
 ```powershell
 .\install.ps1 -Voice -TtsEngine chatterbox-turbo
 # Standalone: whas-setup.exe --install --voice --tts-engine chatterbox-turbo
 .\install.ps1 -Voice -TtsEngine piper-tts
 # Standalone: whas-setup.exe --install --voice --tts-engine piper-tts
+.\install.ps1 -Voice -TtsEngine f5-tts
+# Standalone: whas-setup.exe --install --voice --tts-engine f5-tts
 ```
 
-Chatterbox remains the default and supports CPU/CUDA and reference-WAV voice cloning. Piper is a lighter CPU-only option using a pre-trained English voice; it does not install PyTorch or support voice cloning. Both currently require Python 3.11 x64 and the Visual C++ runtime. Interactive setup offers the engine choice. Only one engine is installed at a time; uninstall before switching engines.
+Chatterbox remains the default and supports CPU/CUDA and reference-WAV voice cloning. Piper is a lighter CPU-only option using a pre-trained English voice; it does not install PyTorch or support voice cloning. F5 supports CPU/CUDA and reference voices with a WAV plus an exact transcript; its pretrained weights are CC-BY-NC-4.0 (noncommercial use only). All three require Python 3.11 x64 and the Visual C++ runtime. Interactive setup offers the engine choice. Only one engine is installed at a time; uninstall before switching engines.
 
-The main uninstaller coordinates the installed strategy's cleanup hook and ownership-based removal. Personal voice data is preserved. See [TTS strategy packages](docs/tts-strategies.md) for the package contract, runtime layout, compatibility and licensing notices. F5-TTS is not bundled yet.
+The main uninstaller coordinates the installed strategy's cleanup hook and ownership-based removal. Personal voice data is preserved. See [TTS strategy packages](docs/tts-strategies.md) for the package contract, runtime layout, compatibility and licensing notices.
 
 ## Troubleshooting
 

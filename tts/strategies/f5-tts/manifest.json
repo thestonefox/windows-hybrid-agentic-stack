@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 1,
+  "id": "f5-tts",
+  "version": "1.0.0",
+  "name": "F5-TTS",
+  "description": "Reference-conditioned speech on CPU or CUDA; pretrained weights are noncommercial. Custom WAV voices need a matching transcript.",
+  "platforms": [
+    "windows-x64"
+  ],
+  "devices": [
+    "cpu",
+    "cuda"
+  ],
+  "prerequisites": {
+    "visualCpp": true,
+    "python": "3.11"
+  },
+  "capabilities": {
+    "voiceCloning": true,
+    "builtinVoice": true
+  },
+  "entrypoints": {
+    "backend": "backend.py",
+    "install": "install.ps1",
+    "uninstall": "uninstall.ps1"
+  },
+  "files": [
+    "install.ps1",
+    "uninstall.ps1",
+    "backend.py",
+    "requirements.txt",
+    "requirements-cpu.txt",
+    "requirements-cuda.txt",
+    "bootstrap.txt",
+    "prepare_model.py",
+    "NOTICE.md"
+  ],
+  "license": "MIT (code); CC-BY-NC-4.0 (F5 pretrained weights)",
+  "models": [
+    {
+      "source": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/model_1250000.safetensors",
+      "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+      "sha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38",
+      "license": "CC-BY-NC-4.0"
+    },
+    {
+      "source": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/vocab.txt",
+      "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+      "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c",
+      "license": "CC-BY-NC-4.0"
+    },
+    {
+      "source": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/README.md",
+      "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+      "sha256": "cf3354feaf4020527b3642b12a5a382de13d0af6bc99e8d37bee84425c1ca224",
+      "license": "CC-BY-NC-4.0"
+    },
+    {
+      "source": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/config.yaml",
+      "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+      "sha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc",
+      "license": "MIT"
+    },
+    {
+      "source": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/pytorch_model.bin",
+      "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+      "sha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a",
+      "license": "MIT"
+    },
+    {
+      "source": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/README.md",
+      "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+      "sha256": "5858497d76d58914b29958a0f448e7b4fd3bb54940100baaa7520d4a56d8b3df",
+      "license": "MIT"
+    }
+  ]
+}
