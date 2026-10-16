@@ -102,6 +102,59 @@ contribute. Measure the stages before claiming the root cause is proven.
 Suggested additional commit:
 `fix(tts): bound status checks and avoid repeated ownership scans`
 
+## 1b. Show activity throughout everyday use
+
+### Reported defect
+
+A question can appear to do nothing while the model is responding, then again
+while speech is generated. The absence of feedback makes ordinary use look
+broken. Installation and status feedback alone do not address this problem.
+Apply this requirement to existing one-shot commands first and carry it into
+the proposed unified CLI, contextual chat and graphical interfaces.
+
+- [ ] Announce meaningful phases promptly: contacting the selected provider,
+  waiting for the response, receiving the response, preparing the speech engine
+  if necessary, generating speech and playing audio. Report only stages actually
+  observed by the backend; do not invent fine-grained provider/model progress.
+- [ ] During long silent waits, show periodic activity with elapsed time, including
+  first model/service startup and the gap between answer completion and audio.
+- [ ] Identify the selected local/cloud route, model and speech engine where
+  useful, without printing credentials, private prompts or internal event data.
+- [ ] Distinguish model loading from generation only when the backend reports it.
+  Otherwise describe the observable operation, such as waiting for the model.
+- [ ] Display the answer as soon as available; do not hide it until speech finishes.
+  Preserve existing answer extraction and avoid leaking provider control text.
+- [ ] Keep activity separate from answer content and raw machine-readable logs.
+  Do not contaminate piped/redirected answer output or speak activity messages.
+- [ ] Define terminal/noninteractive rendering deliberately. Use a transient
+  indicator in an interactive terminal and explicit diagnostic output when
+  requested; keep scripting and structured-output contracts stable.
+- [ ] Stop indicators on success, failure, timeout and cancellation. Show useful
+  errors and preserve failure exit codes; never leave a false busy state.
+- [ ] Support cancellation through the full request/speech pipeline. Stop only
+  request-owned work and clearly report any operation that cannot be cancelled.
+- [ ] Use the shared structured event contract for terminal and GUI feedback.
+  Do not require verbose/debug mode merely to know a request is still active.
+- [ ] Review whether answers can stream through each supported runtime, while
+  keeping speech synthesis and final-answer extraction correct. Streaming is
+  an additional capability, not a replacement for silent-wait feedback.
+
+### Acceptance
+
+- [ ] Exercise delayed local and cloud responses, cold/warm model startup, delayed
+  speech generation and playback, both with and without voice output.
+- [ ] Confirm prompt phase feedback and continuing activity during a deliberately
+  delayed fake backend without requiring real cloud spending or audio listening.
+- [ ] Test provider/TTS failures, unresponsive services and cancellation at each
+  boundary; ensure the UI clears its activity state and exposes the outcome.
+- [ ] Verify piped answers, redirected output, verbose/raw logs and synthesized
+  speech contain no spinner frames or progress narration.
+- [ ] Confirm the later GUI exposes the same phases and outcomes, including the
+  wait before the first response token and between text and audible playback.
+
+Suggested additional commit:
+`feat(cli): show request and speech activity throughout execution`
+
 ## 2. Establish the unified command interface
 
 ### Agreed direction
@@ -343,6 +396,8 @@ checks the complete flow rather than postponing all guides until the end.
 - [ ] Existing commands remain compatible and new shortcuts behave identically.
 - [ ] One-shot calls remain independent; contextual sessions resume intentionally.
 - [ ] Progress covers lengthy preparation, execution and finalisation phases.
+- [ ] Everyday requests show model/speech activity without contaminating answers,
+  logs or audio, and always clear indicators on failure or cancellation.
 - [ ] Fresh, repeat, failed, cancelled and interrupted operations are covered.
 - [ ] Test installs leave the host at its original baseline after cleanup.
 - [ ] Repository/history and distributable privacy checks pass. Report what was
