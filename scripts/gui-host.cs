@@ -15,6 +15,34 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 namespace WindowsHybridAgenticStack {
+    public static class GuiMaintenance {
+        public static bool IsTemporarySetup(string executable) {
+            string directory=Path.GetDirectoryName(Path.GetFullPath(executable));
+            return String.Equals(Path.GetDirectoryName(directory).TrimEnd('\\'),Path.GetTempPath().TrimEnd('\\'),StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(Path.GetFileName(directory),"^whas-setup-ui-[a-f0-9]{32}$") && Path.GetFileName(executable)=="whas-setup.exe";
+        }
+        public static string CopySetup(string executable) {
+            string directory=Path.Combine(Path.GetTempPath(),"whas-setup-ui-"+Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            string target=Path.Combine(directory,"whas-setup.exe");
+            File.Copy(executable,target); File.SetAttributes(target,FileAttributes.Normal); return target;
+        }
+        public static void CleanupAfterExit(string executable) {
+            string directory=Path.GetDirectoryName(Path.GetFullPath(executable));
+            if(!IsTemporarySetup(executable)) return;
+            string literal=executable.Replace("'","''"); string folder=directory.Replace("'","''");
+            string code="Wait-Process -Id "+Process.GetCurrentProcess().Id+" -ErrorAction SilentlyContinue; for($i=0;$i -lt 30;$i++){try{[IO.File]::Delete('"+literal+"');[IO.Directory]::Delete('"+folder+"');break}catch{Start-Sleep -Milliseconds 200}}";
+            string shell=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","WindowsPowerShell","v1.0","powershell.exe");
+            Process.Start(new ProcessStartInfo(shell,"-NoLogo -NoProfile -NonInteractive -EncodedCommand "+Convert.ToBase64String(Encoding.Unicode.GetBytes(code))){UseShellExecute=false,CreateNoWindow=true});
+        }
+        public static void CheckUnlockedGui(string root) {
+            string prefix=Path.GetFullPath(root).TrimEnd('\\')+"\\";
+            foreach(var process in Process.GetProcesses()) {
+                try {
+                    if((process.ProcessName=="whas-gui" || process.ProcessName=="whas-setup") && process.MainModule.FileName.StartsWith(prefix,StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Close other WHAS windows in this installation before uninstalling.");
+                } catch(System.ComponentModel.Win32Exception) { } finally { process.Dispose(); }
+            }
+        }
+    }
     public sealed class GuiProcess : IDisposable {
         private Process process;
         private IntPtr job;
@@ -156,8 +184,8 @@ namespace WindowsHybridAgenticStack {
         private readonly Label voiceSupport=new Label();
         private readonly Dictionary<string,Dictionary<string,object>> voiceInventory=new Dictionary<string,Dictionary<string,object>>();
 
-        public WhasWindow(bool isSetup,string path,string setupCatalog) {
-            setup=isSetup; executable=path; root=ResolveRoot(path);
+        public WhasWindow(bool isSetup,string path,string setupCatalog,string initialRoot=null) {
+            setup=isSetup; executable=path; root=initialRoot==null?ResolveRoot(path):Path.GetFullPath(initialRoot);
             Text=setup ? "WHAS Setup" : "WHAS";
             Font=new Font("Segoe UI",10); AutoScaleMode=AutoScaleMode.Dpi;
             Size=new Size(980,800); MinimumSize=new Size(820,640); StartPosition=FormStartPosition.CenterScreen;
@@ -179,7 +207,7 @@ namespace WindowsHybridAgenticStack {
             };
             FormClosed+=delegate { if (operation != null) operation.Dispose(); };
         }
-        private static string ResolveRoot(string path) {
+        internal static string ResolveRoot(string path) {
             string adjacent=Path.GetDirectoryName(path);
             if (File.Exists(Path.Combine(adjacent,".whas-installation.json"))) return adjacent;
             string marker=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".windows-hybrid-agentic-stack","bin","install-root.txt");
@@ -288,6 +316,7 @@ namespace WindowsHybridAgenticStack {
             retainModels.Text="Retain installer-created Ollama models"; retainModels.Width=600; uninstall.Controls.Add(retainModels);
             Button(uninstall,"Preview removal",delegate { Run(executable,Removal(false),null); });
             Button(uninstall,"Uninstall…",delegate {
+                GuiMaintenance.CheckUnlockedGui(destination.Text);
                 if(MessageBox.Show(this,"Remove this tracked installation? Personal/modified files are preserved. Review the preview before proceeding.","Confirm uninstall",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)!=DialogResult.Yes) return;
                 Run(executable,Removal(true),delegate(int code,string text) { if(code==0) status.Text="Uninstallation complete. Review the receipt; reopen existing terminals to refresh PATH."; });
             });
@@ -354,7 +383,11 @@ namespace WindowsHybridAgenticStack {
             Button(maintenance,"Open setup / uninstall",delegate { OpenSetup(); });
             Button(maintenance,"Open installation guide",delegate { string doc=Path.Combine(root,"docs","installation.md"); Process.Start(new ProcessStartInfo(File.Exists(doc)?doc:"https://github.com/thestonefox/windows-hybrid-agentic-stack"){UseShellExecute=true}); });
         }
-        private void OpenSetup() { string file=Path.Combine(root,"whas-setup.exe"); if(!File.Exists(file)) throw new FileNotFoundException("The graphical setup component is missing; repair the installation."); Process.Start(new ProcessStartInfo(file){UseShellExecute=true}); }
+        private void OpenSetup() {
+            string file=Path.Combine(root,"whas-setup.exe"); if(!File.Exists(file)) throw new FileNotFoundException("The graphical setup component is missing; repair the installation.");
+            Process.Start(new ProcessStartInfo(GuiMaintenance.CopySetup(file),"--gui --install-path "+GuiProcess.Quote(root)){UseShellExecute=false,CreateNoWindow=true});
+            Close();
+        }
         private void RefreshRuntimes() {
             Command(new[]{"agent","list"},delegate(int code,string text) {
                 if(code!=0) return;

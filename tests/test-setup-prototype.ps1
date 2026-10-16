@@ -157,6 +157,11 @@ exit 0
     Assert-True ($configuration.model -ceq 'openai/native-fixture') 'Native installation applies explicit config overrides'
     Assert-True (Test-Path -LiteralPath (Join-Path $fakeUser '.windows-hybrid-agentic-stack\bin\agent.exe')) 'Native installation registers real executable launchers in isolated user folder'
     $hash = (Get-FileHash -LiteralPath $ownershipPath).Hash
+    $start=New-Object Diagnostics.ProcessStartInfo
+    $start.FileName=Join-Path $target 'whas-setup.exe'; $start.Arguments='--uninstall --apply --yes'
+    $start.UseShellExecute=$false; $start.CreateNoWindow=$true; $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
+    $self=[Diagnostics.Process]::Start($start)
+    try { $text=$self.StandardError.ReadToEnd();$self.WaitForExit();Assert-True ($self.ExitCode -eq 1 -and $text -like '*outside the installation*' -and (Get-FileHash -LiteralPath $ownershipPath).Hash -ceq $hash) 'Console self-uninstall refuses locked-image removal before making changes' } finally { $self.Dispose() }
     $null = Invoke-RestrictedSetup @('--uninstall','--install-path',$target,'--no-path')
     Assert-True ((Get-FileHash -LiteralPath $ownershipPath).Hash -ceq $hash) 'Native uninstall preview is read-only'
     $null = Invoke-RestrictedSetup @('--uninstall','--install-path',$target,'--no-path','--apply','--yes')

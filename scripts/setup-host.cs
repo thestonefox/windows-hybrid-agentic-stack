@@ -39,14 +39,22 @@ namespace WindowsHybridAgenticStack {
         [STAThread]
         public static int Main(string[] args) {
             if(Environment.GetEnvironmentVariable("WHAS_PROGRESS_EVENTS")=="1") Console.OutputEncoding=new System.Text.UTF8Encoding(false);
-            if (args.Length == 0 || (args.Length == 1 && args[0] == "--gui") || (args.Length == 2 && args[0] == "--gui-render")) {
+            if (args.Length == 0 || (args.Length == 1 && args[0] == "--gui") || (args.Length == 3 && args[0] == "--gui" && args[1] == "--install-path") || (args.Length == 2 && args[0] == "--gui-render")) {
                 System.Windows.Forms.Application.EnableVisualStyles();
                 System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
                 string executable = System.Reflection.Assembly.GetExecutingAssembly().Location;
-                using (var window = new WhasWindow(true, executable, SetupPayload.StrategyCatalog)) {
+                string adjacent=System.IO.Path.GetDirectoryName(executable);
+                bool render=args.Length==2;
+                if(!render && !GuiMaintenance.IsTemporarySetup(executable)) {
+                    string copy=GuiMaintenance.CopySetup(executable);
+                    string initialRoot=args.Length==3?args[2]:WhasWindow.ResolveRoot(executable);
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(copy,"--gui --install-path "+GuiProcess.Quote(initialRoot)){UseShellExecute=false,CreateNoWindow=true});
+                    return 0;
+                }
+                try { using (var window = new WhasWindow(true, executable, SetupPayload.StrategyCatalog,args.Length==3?args[2]:null)) {
                     if (args.Length == 2) window.Render(args[1]);
                     else System.Windows.Forms.Application.Run(window);
-                }
+                } } finally { if(!render) GuiMaintenance.CleanupAfterExit(executable); }
                 return 0;
             }
             try { return Run(args); }
@@ -115,6 +123,8 @@ namespace WindowsHybridAgenticStack {
             if (ttsEngine != null && !voice) throw new ArgumentException("--tts-engine requires --voice.");
             if ((localModels != null || defaultLocalModel != null) && (!local || mode == "--uninstall")) throw new ArgumentException("Local model selection requires --local setup.");
             if (mode == "--uninstall") {
+                string adjacent=System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+                if(System.IO.File.Exists(System.IO.Path.Combine(adjacent,".whas-installation.json")) && (path==null || String.Equals(System.IO.Path.GetFullPath(path).TrimEnd('\\'),adjacent.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Open the installed setup without arguments for graphical removal, or run a copy outside the installation directory for console uninstall.");
                 if (core || cloud || local || voice || config != null || ttsEngine != null || defaultLocation != null) throw new ArgumentException("Uninstall does not accept component or configuration flags.");
                 Hashtable arguments = new Hashtable { { "Apply", apply }, { "PersistCommandPath", !noPath }, { "RetainManagedModels", retainModels }, { "RemoveManagedModels", removeModels } };
                 if (path != null) arguments.Add("InstallPath", path);

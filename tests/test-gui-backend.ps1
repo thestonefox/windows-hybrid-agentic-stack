@@ -52,6 +52,19 @@ public static class GuiLifecycleTest {
 }
 '@ -ReferencedAssemblies $library
     [GuiLifecycleTest]::Run($fake,(Join-Path $fixture 'child.pid'))
+    $maintenance=[WindowsHybridAgenticStack.GuiMaintenance]::CopySetup($fake)
+    try {
+        if((Get-FileHash -LiteralPath $maintenance).Hash -cne (Get-FileHash -LiteralPath $fake).Hash -or (Split-Path -Parent $maintenance) -eq $fixture -or -not [WindowsHybridAgenticStack.GuiMaintenance]::IsTemporarySetup($maintenance) -or [WindowsHybridAgenticStack.GuiMaintenance]::IsTemporarySetup($fake)) { throw 'Maintenance copy did not preserve the executable outside the installation' }
+    } finally { Remove-Item -LiteralPath $maintenance -Force; Remove-Item -LiteralPath (Split-Path -Parent $maintenance) }
+    $lockedRoot=Join-Path $fixture 'locked-installation'
+    [IO.Directory]::CreateDirectory($lockedRoot)|Out-Null
+    $lockedExe=Join-Path $lockedRoot 'whas-gui.exe'; Copy-Item -LiteralPath $fake -Destination $lockedExe
+    $locked=Start-Process -FilePath $lockedExe -ArgumentList @('--child',(Join-Path $fixture 'locked.pid')) -WindowStyle Hidden -PassThru
+    try {
+        $rejected=$false
+        try { [WindowsHybridAgenticStack.GuiMaintenance]::CheckUnlockedGui($lockedRoot) } catch { $rejected=$_.Exception.Message -like '*Close other WHAS windows*' }
+        if(-not $rejected) { throw 'Graphical uninstall accepted an installed application image that is still running' }
+    } finally { if(-not $locked.HasExited) {$locked.Kill();$locked.WaitForExit()};$locked.Dispose() }
     $exe=Join-Path $fixture 'whas-gui.exe'
     & (Join-Path $repo 'scripts/build-gui.ps1') -OutputPath $exe
     $render=Join-Path $fixture 'client.png'
