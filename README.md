@@ -27,7 +27,7 @@ a task that reads or writes files.
 
 | PowerShell | Graphical app |
 |---|---|
-| <a href="docs/images/cli-terminal.svg"><img src="docs/images/cli-terminal.svg" alt="Illustrative PowerShell terminal showing whas ask, chat, perform, ask with voice, and tts say" width="500"></a><br>[CLI guide and all flags](docs/cli.md) | <a href="docs/images/gui-conversation.png"><img src="docs/images/gui-conversation.png" alt="WHAS Assistant showing a sample conversation" width="500"></a><br>[GUI guide](docs/gui.md) |
+| <a href="docs/images/cli-terminal.svg"><img src="docs/images/cli-terminal.svg" alt="Illustrative PowerShell terminal showing whas ask, chat, perform, ask with voice, and tts say" width="500" height="379"></a><br>[CLI guide and all flags](docs/cli.md) | <a href="docs/images/gui-conversation.png"><img src="docs/images/gui-conversation.png" alt="WHAS Assistant showing a sample conversation" width="500" height="379"></a><br>[GUI guide](docs/gui.md) |
 
 ## Commands
 

@@ -1,22 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="690" viewBox="0 0 1000 690" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="880" viewBox="0 0 1000 758.62069" role="img" aria-labelledby="title description">
   <title id="title">WHAS commands in a Windows PowerShell terminal</title>
   <desc id="description">Examples of asking a question, starting a conversation, running a file task and speaking an answer from the generic C:\work folder.</desc>
-  <rect width="1000" height="690" rx="18" fill="#0c0c0c"/>
+  <rect width="1000" height="758.62069" rx="18" fill="#0c0c0c"/>
   <path d="M18 0h964a18 18 0 0 1 18 18v54H0V18A18 18 0 0 1 18 0Z" fill="#292929"/>
   <rect x="16" y="16" width="274" height="56" rx="10" fill="#0c0c0c"/>
   <rect x="32" y="30" width="27" height="27" rx="5" fill="#173e76"/>
   <text x="39" y="50" fill="#fff" font-family="Consolas, monospace" font-size="20" font-weight="bold">&gt;_</text>
   <text x="72" y="52" fill="#f3f3f3" font-family="Segoe UI, sans-serif" font-size="23">Windows PowerShell</text>
-  <text x="35" y="125" fill="#a7c8f0" font-family="Consolas, monospace" font-size="25">PS C:\work&gt;</text>
-  <text x="215" y="125" fill="#f5f5f5" font-family="Consolas, monospace" font-size="25">whas ask "What is 2 + 2?"</text>
-  <text x="35" y="175" fill="#a9d5aa" font-family="Consolas, monospace" font-size="23">2 + 2 = 4.</text>
-  <text x="35" y="267" fill="#a7c8f0" font-family="Consolas, monospace" font-size="25">PS C:\work&gt;</text>
-  <text x="215" y="267" fill="#f5f5f5" font-family="Consolas, monospace" font-size="25">whas chat --no-voice</text>
-  <text x="35" y="359" fill="#a7c8f0" font-family="Consolas, monospace" font-size="25">PS C:\work&gt;</text>
-  <text x="215" y="359" fill="#f5f5f5" font-family="Consolas, monospace" font-size="25">whas perform "Create notes.txt here"</text>
-  <text x="35" y="451" fill="#a7c8f0" font-family="Consolas, monospace" font-size="25">PS C:\work&gt;</text>
-  <text x="215" y="451" fill="#f5f5f5" font-family="Consolas, monospace" font-size="25">whas ask --voice "Explain gravity"</text>
-  <text x="35" y="543" fill="#a7c8f0" font-family="Consolas, monospace" font-size="25">PS C:\work&gt;</text>
-  <text x="215" y="543" fill="#f5f5f5" font-family="Consolas, monospace" font-size="25">whas tts say "Hello from WHAS"</text>
-  <rect x="35" y="604" width="15" height="28" fill="#f5f5f5"/>
+  <text x="35" y="145" fill="#a7c8f0" font-family="Consolas, monospace" font-size="25">PS C:\work&gt;</text>
+  <text x="215" y="145" fill="#f5f5f5" font-family="Consolas, monospace" font-size="25">whas ask "What is 2 + 2?"</text>
+  <text x="35" y="197" fill="#a9d5aa" font-family="Consolas, monospace" font-size="23">2 + 2 = 4.</text>
+  <text x="35" y="293" fill="#a7c8f0" font-family="Consolas, monospace" font-size="25">PS C:\work&gt;</text>
+  <text x="215" y="293" fill="#f5f5f5" font-family="Consolas, monospace" font-size="25">whas chat --no-voice</text>
+  <text x="35" y="393" fill="#a7c8f0" font-family="Consolas, monospace" font-size="25">PS C:\work&gt;</text>
+  <text x="215" y="393" fill="#f5f5f5" font-family="Consolas, monospace" font-size="25">whas perform "Create notes.txt here"</text>
+  <text x="35" y="493" fill="#a7c8f0" font-family="Consolas, monospace" font-size="25">PS C:\work&gt;</text>
+  <text x="215" y="493" fill="#f5f5f5" font-family="Consolas, monospace" font-size="25">whas ask --voice "Explain gravity"</text>
+  <text x="35" y="593" fill="#a7c8f0" font-family="Consolas, monospace" font-size="25">PS C:\work&gt;</text>
+  <text x="215" y="593" fill="#f5f5f5" font-family="Consolas, monospace" font-size="25">whas tts say "Hello from WHAS"</text>
+  <rect x="35" y="666" width="15" height="28" fill="#f5f5f5"/>
 </svg>
