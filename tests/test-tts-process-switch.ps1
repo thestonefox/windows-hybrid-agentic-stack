@@ -45,6 +45,7 @@ try {
         $manifest.id=$id; $manifest.name=$id; $manifest.models=@(); $manifest.devices=@('cpu')
         $manifest.files=@('install.ps1','uninstall.ps1','backend.py')
         $manifest.capabilities.voiceCloning=($id -eq 'fixture-two')
+        $manifest.PSObject.Properties.Remove('voiceReference')
         if($id -eq 'fixture-two'){$manifest | Add-Member -NotePropertyName voiceReference -NotePropertyValue ([pscustomobject]@{transcriptRequired=$true})}
         Write-Fixture (Join-Path $package 'manifest.json') ($manifest | ConvertTo-Json -Depth 12)
         Write-Fixture (Join-Path $package 'install.ps1') @'

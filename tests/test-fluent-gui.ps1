@@ -175,7 +175,8 @@ try {
   if($downloads.Count -ne 4){throw 'Missing-component actions are not attached to Python, Ollama, OpenCode and Visual C++ rows'}
   $wingetButtons=@(Children $window.Content|Where-Object {$_ -is [Windows.Controls.Button] -and $_.Content -eq 'Install with WinGet'})
   if($wingetButtons.Count -ne 4){throw 'Missing WinGet actions'}
-  foreach($button in $wingetButtons){if($button.IsEnabled){throw 'WinGet action enabled without WinGet'}}
+  $wingetAvailable=$null -ne $controller.GetType().GetMethod('FindWinGet',[Reflection.BindingFlags]'NonPublic,Static').Invoke($null,@())
+  foreach($button in $wingetButtons){if($button.IsEnabled -ne $wingetAvailable){throw 'WinGet action availability does not match this PC'}}
   $packageMethod=$controller.GetType().GetMethod('PrerequisiteInstallArguments',[Reflection.BindingFlags]'NonPublic,Static')
   foreach($pair in @(@('Python 3.11','Python.Python.3.11'),@('Visual C++ x64','Microsoft.VCRedist.2015+.x64'),@('OpenCode','SST.opencode'),@('Ollama','Ollama.Ollama'))) {
    $actual=$packageMethod.Invoke($null,@([string]$pair[0]))
