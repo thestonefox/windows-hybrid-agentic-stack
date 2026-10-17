@@ -1,0 +1,4 @@
+# Low-cost default for this repository. Override the model or effort for
+# difficult installer, removal, permissions, or concurrency work.
+model = "gpt-6-sol"
+model_reasoning_effort = "low"
