@@ -15,6 +15,12 @@ separate installer EXE beside it. Before a complete installation exists, it
 opens feature configuration. After installation it opens **Assistant**;
 feature configuration and removal remain available in the same window.
 An interrupted or malformed installation record opens configuration/recovery.
+The screenshots use the current WPF interface in dark mode with sample paths
+and an example conversation.
+
+![First-run Features page with Cloud AI, Local AI, Speech and the installation folder](images/gui-setup-features.png)
+
+The first page lets you choose the components and installation folder.
 
 1. **Features:** cloud/local/speech components, destination and default route.
    Select all, or select none for the shared app without optional components.
@@ -48,6 +54,11 @@ An interrupted or malformed installation record opens configuration/recovery.
    **Check Again** refreshes the review. The activity log stays closed for a
    successful review. Confirm installation with **Apply selected features**
    after reviewing the current plan.
+
+![Models and engines page with local model choices and per-engine device options](images/gui-setup-models.png)
+
+The model and speech-engine choices are separate, including the device choice
+beneath each supported speech engine.
 
 The primary installer action stays fixed at the bottom right, outside the
 scrolling page. Its width fits the longest action label and stays the same
@@ -162,28 +173,39 @@ Assistant fills the window. The top-right cog opens **Configuration** (also
 identified by its tooltip); **Back to Assistant** appears in the same position.
 There is no installed-app sidebar.
 
-- **Assistant:** a large response area appears above the multiline composer.
-  An empty response area greets you; the input has a placeholder that disappears
-  when typing. Enter sends; Shift+Enter inserts a new line. Beneath the input, Run on and Speak the
-  answer sit on the left; Operation and Send sit on the right. Run on offers
-  just This PC and Cloud, with the saved default first and marked `(Default)`.
-  Sending immediately adds your message to the response area with animated
-  waiting dots underneath. The reply replaces those dots; cancellation or
-  failure replaces them with a status message. New drafts are preserved when
-  a reply arrives.
-  **New chat** sits on the bottom-right edge of the response border. It clears
-  displayed messages, the draft and local history, and resets the cloud session
-  ID. It is unavailable while an operation is running. OpenCode's separately
-  stored native transcripts and WHAS session associations remain.
-  Operation defaults to Conversation, followed by Run a task and One-off
-  question. One-off questions and tasks are independent; Conversation
-  keeps this window's conversation history. Local chat calls Ollama directly
-  and displays streamed reply text as it arrives, without starting OpenCode.
-  Only Run a task uses file or system tools. Completed answers appear before
-  optional playback; speech diagnostics stay in the activity log. A playback
-  failure does not discard the answer.
-- **Configuration:** tabs for General, Workspaces, Models, Speech,
-  Conversations and Maintenance. Maintenance groups Features above Removal.
+### Assistant
+
+![Assistant with a response area, multiline message box and request controls](images/gui-assistant.png)
+
+A large response area appears above the multiline composer. An empty response
+area greets you; the input has a placeholder that disappears when typing.
+Enter sends; Shift+Enter inserts a new line. Beneath the input, Run on and Speak
+the answer sit on the left; Operation and Send sit on the right. Run on offers
+just This PC and Cloud, with the saved default first and marked `(Default)`.
+Sending immediately adds your message to the response area with animated
+waiting dots underneath. The reply replaces those dots; cancellation or
+failure replaces them with a status message. New drafts are preserved when
+a reply arrives.
+
+**New chat** sits on the bottom-right edge of the response border. It clears
+displayed messages, the draft and local history, and resets the cloud session
+ID. It is unavailable while an operation is running. OpenCode's separately
+stored native transcripts and WHAS session associations remain.
+
+Operation defaults to Conversation, followed by Run a task and One-off
+question. One-off questions and tasks are independent; Conversation keeps this
+window's conversation history. Local chat calls Ollama directly and displays
+streamed reply text as it arrives, without starting OpenCode. Only Run a task
+uses file or system tools. Completed answers appear before optional playback;
+speech diagnostics stay in the activity log. A playback failure does not
+discard the answer.
+
+![A sample conversation with a right-aligned question bubble and left-aligned reply](images/gui-conversation.png)
+
+### Configuration and workspaces
+
+Configuration has tabs for General, Workspaces, Models, Speech, Conversations
+and Maintenance. Maintenance groups Features above Removal.
 
 General contains headings for appearance and everyday request defaults.
 **Appearance** offers **System theme**, **Light** and **Dark**. System theme
@@ -195,6 +217,9 @@ folders stay available. Changing the list or starting folder starts a new
 conversation. Removing an entry never deletes its folder or files. A missing
 starting folder must be replaced before running a task. Ordinary chat does
 not need workspace access.
+
+![Workspaces configuration with an available folder and starting folder selector](images/gui-workspaces.png)
+
 Workspace and installation-folder pickers use the Windows file-browser dialog
 in folder mode, with an address bar and **Select folder** button.
 
@@ -214,6 +239,8 @@ separate from shared CLI/provider/model settings and contain no credentials.
 Concurrent conflicting saves are rejected with instructions to reopen the
 window. Personal preferences are retained when WHAS is removed.
 
+### Models
+
 Models groups runtime choices, cloud models and local models under headings.
 OpenCode is the supported runtime. Cloud and local models are selectors, populated from
 OpenCode's configured-provider model list and Ollama's installed models.
@@ -231,6 +258,8 @@ settings after CLI edits. Changes under Models save shared defaults for CLI
 and GUI requests; the Assistant's Run on choice only overrides the current
 window's requests. The selected runtime is used for tasks and cloud requests;
 GUI plain local chat uses Ollama directly.
+
+### Speech
 
 Speech groups startup/hardware defaults and engine/voice management.
 **Stop speech engine after idle (minutes)** saves automatically. Zero disables
@@ -292,6 +321,8 @@ them. Voice import/removal, default changes and GUI playback use bundled code, s
 an older installed validator cannot reject a valid voice default. Defaults
 remain in the shared configuration used by CLI speech commands.
 
+### Provider sign-in, conversations and maintenance
+
 Models includes **Manage OpenCode accounts** for provider sign-in. The temporary
 loopback server uses a random password shown only in that window and stops when
 the window closes. Conversations contains the cloud session ID, New
@@ -313,3 +344,6 @@ interactions fail or require OpenCode's native interface.
 
 See [CLI settings](cli.md) and [agent sessions and memory](agent-strategies.md#sessions-and-memory)
 for scope, routing and personal-data behaviour.
+
+To refresh these screenshots after a GUI change, run
+`scripts/render-gui-docs.ps1` from the source checkout in Windows PowerShell 5.1.

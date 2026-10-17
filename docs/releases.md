@@ -38,7 +38,8 @@ release. A passing GitHub build does not cover those eight suites.
 
 After a successful run, open its **Actions** page and download the artifact from
 the **Artifacts** section. GitHub artifact downloads may require signing in.
-The versioned ZIP contains the installer, guides and notices. The loose EXE is
+The versioned ZIP contains the installer, guides, GUI screenshots and notices.
+The loose EXE is
 also included for copying to another PC. External prerequisites must still be
 installed separately.
 

@@ -19,6 +19,14 @@ For PowerShell setup, use the included `install.ps1` instead.
 The EXE is unsigned, so Windows may display an unrecognized-app or unknown-publisher
 warning. See [EXE setup and verification](docs/installation.md#standalone-executable-setup).
 
+## Two ways to use WHAS
+
+After setup, use PowerShell commands or open `whas-gui.exe`:
+
+| PowerShell | Graphical app |
+|---|---|
+| <code>whas ask "What is 2 + 2?"</code><br><code>whas chat</code><br><code>whas --help</code><br><br>[Command reference](docs/cli.md#complete-command-and-flag-reference) | <a href="docs/images/gui-conversation.png"><img src="docs/images/gui-conversation.png" alt="WHAS Assistant showing a sample conversation" width="500"></a><br>[GUI guide](docs/gui.md) |
+
 ## Commands
 
 **[All CLI commands and flags](docs/cli.md#complete-command-and-flag-reference)**
