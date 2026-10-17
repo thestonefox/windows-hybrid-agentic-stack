@@ -141,7 +141,7 @@ class StrategyServiceTests(unittest.TestCase):
                     self.fail('Service did not become ready')
                 time.sleep(0.05)
         self.assertEqual(status['engine'], 'test-engine')
-        self.assertEqual(Path(status['installation_root']), self.root)
+        self.assertEqual(Path(status['installation_root']), self.root.resolve())
 
         def request(path, payload):
             connection = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
