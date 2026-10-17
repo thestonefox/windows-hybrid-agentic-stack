@@ -18,11 +18,11 @@ If speech is already installed with the engine-management commands, stop it
 and add Chatterbox from the installed catalog:
 
 ```powershell
-tts-stop
+whas tts stop
 ```
 
 ```powershell
-tts-engine-install chatterbox-turbo
+whas tts install chatterbox-turbo
 ```
 
 The installer uses a private Python environment and model directory. Automatic
@@ -32,11 +32,11 @@ must be supported on the target machine.
 ## Start and speak
 
 ```powershell
-tts-start --engine chatterbox-turbo
+whas tts start --engine chatterbox-turbo
 ```
 
 ```powershell
-tts-say -Text 'Hello from Chatterbox.' --engine chatterbox-turbo
+whas tts say -Text 'Hello from Chatterbox.' --engine chatterbox-turbo
 ```
 
 Only one engine runs at a time. Selecting another installed engine stops the
@@ -48,16 +48,25 @@ Use a clear WAV recording of one speaker that you have permission to use.
 A transcript is not required. Replace the example path with your actual file:
 
 ```powershell
-tts-voice-add -Path 'C:\Voices\sample.wav' -Name myvoice --engine chatterbox-turbo
+whas tts voice-add -Path 'C:\Voices\sample.wav' -Name myvoice --engine chatterbox-turbo
 ```
 
 ```powershell
-tts-voice-test myvoice --engine chatterbox-turbo
+whas tts voice-test myvoice --engine chatterbox-turbo
 ```
 
 ```powershell
-tts-voice-list --engine chatterbox-turbo
+whas tts voice-list --engine chatterbox-turbo
 ```
+
+Adding or testing a voice does not make it the default. To use it for future
+Chatterbox speech:
+
+```powershell
+whas configure --set speech.voice myvoice --engine chatterbox-turbo
+```
+
+Set the default engine separately with `whas tts default chatterbox-turbo`.
 
 Names use letters, digits, underscores or hyphens, starting with a letter or
 digit, up to 40 characters. `default` is reserved. Existing voices are not
@@ -66,7 +75,7 @@ overwritten. A Chatterbox profile is separate from a same-named F5 profile.
 To remove a custom profile, confirm the deletion prompt:
 
 ```powershell
-tts-voice-remove myvoice --engine chatterbox-turbo
+whas tts voice-remove myvoice --engine chatterbox-turbo
 ```
 
 ## Remove the engine
@@ -74,13 +83,13 @@ tts-voice-remove myvoice --engine chatterbox-turbo
 Preview:
 
 ```powershell
-tts-engine-uninstall chatterbox-turbo
+whas tts uninstall chatterbox-turbo
 ```
 
 Apply:
 
 ```powershell
-tts-engine-uninstall chatterbox-turbo --apply
+whas tts uninstall chatterbox-turbo --apply
 ```
 
 If it is the default and other engines remain, supply an installed replacement

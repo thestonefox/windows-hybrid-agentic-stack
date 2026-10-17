@@ -23,11 +23,11 @@ From the repository root:
 If speech management is already installed:
 
 ```powershell
-tts-stop
+whas tts stop
 ```
 
 ```powershell
-tts-engine-install f5-tts
+whas tts install f5-tts
 ```
 
 See [installation](../installation.md) for prerequisites, temporary source-script
@@ -36,11 +36,11 @@ permission and the EXE route.
 ## Start and speak
 
 ```powershell
-tts-start --engine f5-tts
+whas tts start --engine f5-tts
 ```
 
 ```powershell
-tts-say -Text 'Hello from F5.' --engine f5-tts
+whas tts say -Text 'Hello from F5.' --engine f5-tts
 ```
 
 Only one engine runs at a time. Selecting F5 stops another active engine;
@@ -63,7 +63,7 @@ bytes. A text file describing the speaker or the desired output is not the
 transcript.
 
 ```powershell
-tts-voice-add -Path 'C:\Voices\sample.wav' -Name myvoice --engine f5-tts
+whas tts voice-add -Path 'C:\Voices\sample.wav' -Name myvoice --engine f5-tts
 ```
 
 A missing transcript is rejected with the expected `.txt` path before model
@@ -73,19 +73,28 @@ overwritten. Adding a profile stores the reference pair; it does not train
 new model weights or download Whisper.
 
 ```powershell
-tts-voice-test myvoice --engine f5-tts
+whas tts voice-test myvoice --engine f5-tts
 ```
 
 ```powershell
-tts-voice-list --engine f5-tts
+whas tts voice-list --engine f5-tts
 ```
+
+Adding or testing a voice does not change the saved default. To use this
+voice for future F5 speech:
+
+```powershell
+whas configure --set speech.voice myvoice --engine f5-tts
+```
+
+Choose F5 as the default engine separately with `whas tts default f5-tts`.
 
 Names contain letters, digits, underscores or hyphens, starting with a letter
 or digit, up to 40 characters. `default` is reserved. Remove a custom pair
 with confirmation:
 
 ```powershell
-tts-voice-remove myvoice --engine f5-tts
+whas tts voice-remove myvoice --engine f5-tts
 ```
 
 ## Remove the engine
@@ -93,13 +102,13 @@ tts-voice-remove myvoice --engine f5-tts
 Preview:
 
 ```powershell
-tts-engine-uninstall f5-tts
+whas tts uninstall f5-tts
 ```
 
 Apply:
 
 ```powershell
-tts-engine-uninstall f5-tts --apply
+whas tts uninstall f5-tts --apply
 ```
 
 If it is the default and other engines remain, add `--default-engine ENGINE`

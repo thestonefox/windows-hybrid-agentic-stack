@@ -1,10 +1,228 @@
-# Planned CLI, agent and graphical interface work
+# Development decisions and validation backlog
 
-This records the agreed scope, decisions and acceptance checks. Checked items
-have supporting implementation/tests; unchecked acceptance cases remain open.
-Use the CLI, GUI and agent guides for commands available in this implementation.
+This records decisions, earlier reviews and acceptance checks. Earlier review
+notes preserve the design and validation state at that time; they are not
+current usage instructions. Use the CLI, GUI and agent guides for current commands.
+
+## Current agreed behaviour: 17 October 2026
+
+- The user approved the GUI on 17 October 2026. The agreed GUI, CLI, setup and
+  documentation work is recorded in repository commits. No release or remote
+  update is claimed.
+- Use `whas ask`, `whas perform`, `whas chat` and `whas tts` in current guides.
+  Legacy launchers remain compatibility interfaces with their older permissions.
+- Conversation is the first GUI operation, Run a task second, One-off question
+  last. Only tasks get file/system tools and saved workspace folder context.
+- GUI local chat goes directly to Ollama and streams replies. Conversation
+  sends completed history from the current window; one-off questions do not
+  read or update it. CLI/cloud chat uses OpenCode and native session IDs.
+  Real Qwen latency against Ollama's GUI has not been benchmarked in this run.
+- OpenCode is the only shipped agent runtime; additional integrations are deferred.
+- Use a top-right Configuration cog and Back control, with no installed sidebar.
+  Configuration tabs are General, Workspaces, Models, Speech, Conversations and
+  Maintenance. Maintenance contains Features and whole-app Removal.
+- Shared dropdown settings autosave. Engine/voice selection has explicit
+  default actions. Panels follow the selected speech engine's capabilities.
+- Run on contains two choices, with the saved route marked `(Default)`.
+  User bubbles align right, replies left, and submitted messages appear
+  immediately with waiting dots until reply text arrives.
+- Send is disabled while preparing, enabled when ready, and becomes Cancel
+  only for a submitted request and its speech. Setup, maintenance and model
+  discovery do not expose Cancel. The bottom progress strip keeps a fixed place.
+- Direct-chat, GUI-workflow, native-CLI and answer-extraction checks passed in
+  background Sandbox with simulated providers. The exact bundle passed Defender
+  scanning and source/hash verification. This is not live model/audio validation.
+- The CI workflow still needs to accommodate the Sandbox-only test guards;
+  see [build status](releases.md#continuous-builds). No remote run is claimed.
+
+## Documentation and help review: 17 October 2026
+
+The README links to the complete CLI command/flag reference. Speech help is
+available through `whas tts --help` and the standalone `tts-help` launcher.
+Older 17-command registrations remain recognized for repair/removal. The new
+launcher is supplied by updated installation/registration; opening a newer GUI
+alone does not install it. New chat clears the displayed chat and current
+context, preserving OpenCode native transcripts and WHAS associations.
 
 ## Work boundary and current status
+
+### Repository GUI compatibility with existing installations
+
+The newer GUI called model catalog on an older installed WHAS CLI, producing
+Unknown command: model during startup. Discover models through the installed
+Ollama list and OpenCode models commands directly, with the selected root's
+OpenCode configuration passed only to that child. Keep shared settings and
+requests bound to the registered installation. Discovery is optional: retain
+saved choices and show configuration guidance on failure or missing tools,
+without automatically opening a fatal-operation log on Assistant. Test against
+a deliberately older backend that rejects every model command. No component
+reinstall or host configuration change is needed to view the new GUI.
+
+Validation: the isolated installed-workflow suite passed with a backend that
+rejects model commands, direct provider fixtures, child-only configuration,
+failed discovery and a missing provider executable. Saved choices survived and
+optional discovery did not open the fatal activity panel. Existing GUI backend
+and WPF suites also passed in Sandbox. Real host providers were not invoked.
+
+### Installed-state detection with large ownership records
+
+Manual launch of the repository GUI opened first-run setup despite a valid
+Installed record. The ownership record exceeded JavaScriptSerializer's default
+2 MB limit; IsConfigured caught the parser exception and returned false. Allow
+the full record size used by private speech environments and test records with
+tens of thousands of file entries. A large Installed record must open Assistant;
+large Interrupted and malformed records must still open recovery/setup. Do not
+modify the user's installation or ask for a reinstall to work around this bug.
+
+### Earlier installed workflow review: Assistant and Configuration
+
+The layout and Save-button proposal in this review was superseded by the
+current behaviour above and the later refinements in section 7.
+
+The accepted setup design did not validate the installed workflow. Manual
+testing found unlabelled message/response boxes, raw configuration keys,
+optional runtimes appearing available, unloaded speech choices, duplicate
+maintenance navigation and CLI chat/speech errors in everyday use.
+
+- Use two installed navigation entries: Assistant and Configuration. Group
+  General, Workspaces, Models, Speech, Conversations and Maintenance in
+  Configuration; retain the first-run setup flow. Provide one removal page.
+- Assistant order: operation; labelled message input and Send; location and
+  Speak the answer; labelled responses. Move workspace/runtime/session tools
+  to Configuration. Do not render these pages using a generic form dump.
+- Show friendly settings labels and adjacent Save actions. Use model selectors
+  populated from Ollama/OpenCode; explicitly label the OpenCode default option.
+  Speech voices belong in the engine-specific Speech section, not a raw key.
+- Load available runtimes and speech inventory automatically. Offer only
+  discovered available runtimes. Keep unavailable engine actions disabled and
+  show installation/error guidance instead of empty unexplained controls.
+- Explain OpenCode setup before applying features. Additional runtime
+  integrations require explicit agreement.
+- Display completed answers before playback. Run GUI speech separately from
+  model generation, including completed conversation turns. Keep diagnostics
+  in the activity log and preserve an answer if playback fails.
+- Test installed navigation and ordering, real redirected mocked CLI requests,
+  automatic inventory/defaults, unavailable runtimes, model choices, speech
+  capability checks and answer/speech separation in background Sandbox.
+
+Subsequent terminology decision: use Run on for requests, with This PC, Cloud
+and Default followed by the actual saved choice. Use Default processing in
+configuration/setup. Keep internal local/cloud values and CLI flags compatible;
+an unsaved feature selection must not change the displayed saved default.
+
+Validation: installed-workflow, GUI backend, WPF presenter and native CLI
+suites passed in the offline Sandbox. Checks cover automatic choices, saved
+defaults, unavailable runtimes/engines, per-engine capability guards, navigation
+to feature application, Run on labels and effective-default binding. Mocked
+conversation generation/playback verifies that speech diagnostics stay out of
+answers and a playback failure preserves the answer. Provider/audio calls were
+mocked; live audio and full manual installed-flow acceptance remain pending.
+
+### Explicit request location
+
+The Features selector offers Cloud and Local only. Fresh setup visibly selects
+Cloud. Load the saved interaction location from the chosen installation folder
+when reconfiguring or changing destination; never label it Automatic. Always
+pass the displayed location to setup, and reject an empty/invalid selection.
+Reloading shared settings also updates the feature default. Test both routes,
+saved defaults, destination changes, invalid values and the WPF binding.
+
+### Accepted WPF design: align model and engine choices
+
+Licence information belongs beside each model/engine name as a compact info
+action, replacing the selected-engine licence line. Hover and keyboard focus
+show scoped licence terms; activation opens details and explicit source links.
+Read speech terms from each strategy manifest, including model assets. Only
+the exact built-in Qwen choices have verified local model metadata; arbitrary
+Ollama IDs must say Licence not verified. Do not fetch metadata on hover or
+change download selections when opening details. Validate the controls and
+rebuild/scan the bundled GUI in the background Sandbox workflow.
+
+Built-in model licence sources (checked 2026-10-16):
+[Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B/blob/main/LICENSE) and
+[Qwen2.5-1.5B](https://huggingface.co/Qwen/Qwen2.5-1.5B/blob/main/LICENSE).
+
+The user accepted the new design and requested defaults first in both cards,
+with their dropdowns aligned even when descriptions wrap. Download checkboxes
+follow the defaults. The additional Ollama model input and compact Add button
+share one row below the model choices. Use common WPF grid rows for alignment.
+
+### Second manual GUI review: replace the visible Forms presentation
+
+The user confirmed the checks work but rejected the Forms presentation. The
+fixed-height prerequisite grid hid results while leaving unused space below;
+the wrapping external-link strip and vertically stacked setup actions also
+failed visual acceptance. Recolouring those controls was insufficient.
+
+- Present the main application with WPF using reusable Fluent-style templates
+  in `scripts/gui-theme.xaml`, following Microsoft WinUI Gallery settings cards.
+  This is WPF, not WinUI 3; no Windows App SDK runtime is installed.
+- Keep the existing action/state controller hidden. Do not host Forms controls
+  in the main window or duplicate installation/configuration backend logic.
+- Use feature cards with switches, a single-row folder picker and aligned
+  default selectors. Keep model/engine selections and defaults distinct.
+- Replace the fixed-height prerequisite grid and standalone link strip with
+  content-sized status rows, wrapped details and missing-component actions
+  attached to their corresponding row. Use one page scroll surface.
+- Keep activity logs collapsed, status visible and Cancel hidden while idle.
+- Validate switch/default bindings, real initial/repeated prerequisite checks,
+  missing-component actions, same-window lifecycle and all first-run renders.
+- Build/test in background Sandbox, scan exact candidate bytes before bundling,
+  retain the manifest freshness check and leave host prerequisites unchanged.
+- Manual visual acceptance remains open until the user reviews this replacement.
+
+Reference: [Microsoft WinUI Gallery](https://github.com/microsoft/WinUI-Gallery).
+
+Validation: the WPF presenter suite passed feature bindings, populated defaults,
+native window-handle creation, all first-run/configured renders, same-window
+state rebuilding, initial/repeated real prerequisite actions and row-scoped
+download actions. Existing GUI backend, native setup and profile integration
+suites passed in Sandbox with external dependencies mocked. The rebuilt EXE
+passed active Defender scanning with signatures `1.461.53.0`, no matching
+detections and an unchanged hash; it was not launched on the host. Manual
+acceptance of the revised appearance remains pending.
+
+### Manual GUI feedback: layout and prerequisite checks
+
+The first manual acceptance pass identified cramped content, an oversized log,
+an unclear Cancel operation button, unlabelled default selectors and a crash
+on Check again (`Console.OutputEncoding`: invalid console handle). Acceptance
+of the earlier offscreen render did not cover that real graphical child path.
+
+- Replace the crowded tab strip with sidebar navigation and page headings.
+- Keep diagnostics collapsed by default, with a bounded expandable panel;
+  keep status, activity and a clearly styled Cancel operation button visible.
+- Label default local model, default speech engine and custom model input.
+- Run the initial prerequisite check when its page is opened; retry on demand.
+- Write UTF-8 directly to redirected streams without requiring console handles,
+  in both setup and installed command launchers.
+- Honour the prerequisite script's explicit exit status. Hosted PowerShell can
+  report HadErrors after a handled probe even when the checker explicitly
+  exits successfully; do not turn passing rows into a failed prerequisite gate.
+- Test real WinExe children with redirected streams, success/failure results
+  and repeat checks; inspect every first-run page offscreen at normal size.
+- Follow Microsoft's layout/spacing guidance, then rebuild in Sandbox, scan
+  the exact exported candidate with active Defender and update the manifest.
+- Keep manual visual acceptance open until the user reviews the revised build.
+
+The render helper now creates child control handles; the old file-size-only
+assertion could accept an almost blank image. Tests sample rendered colours
+and drive the real WinExe check through the UI event queue. Offscreen images
+support layout review; they do not replace manual visual/interaction acceptance.
+
+Design reference: [Microsoft content layout and spacing](https://learn.microsoft.com/en-us/windows/apps/design/basics/content-basics).
+
+Revision validation passed GUI backend, native setup and unified CLI suites in
+the offline Sandbox, plus bundle-verification tests and the actual source/hash
+check. Real WinExe initial/repeated checks populated the grid and enabled the
+passing gate. Native checks covered handled discovery errors with explicit
+success, prerequisite failure, no-console launchers and install/remove cycles
+under Restricted policy; external install dependencies were mocked.
+
+The exact rebuilt bundle passed active host Defender scanning with signatures
+`1.461.53.0`, no matching detections and an unchanged checksum. It was not
+launched on the host. No host prerequisites, saved policies, profiles or PATH
+were changed. Manual acceptance of the revised appearance remains pending.
 
 ### Agreed graphical entry point revision
 
@@ -46,8 +264,9 @@ The second, smaller guest completed the functional suites offline. Its disabled
 WinDefend service rejected enabling with access denied, including in SYSTEM
 context. Those guests were discarded after testing. The subsequent authorized
 host scan is separate evidence and does not establish why the original build
-was detected. Manual graphical acceptance is still outstanding. No host security exclusions or policy/profile
-changes were made. The source fixture now mocks its Ollama inventory instead
+was detected. The user reviewed and approved the GUI on 17 October 2026; this
+records visual acceptance, not a live installation or speech test. No host
+security exclusions or policy/profile changes were made. The source fixture now mocks its Ollama inventory instead
 of depending on a live host server, and the child-PID test retries a brief
 file-sharing race.
 
@@ -87,8 +306,8 @@ the GUI was never launched on the host and no host stack was installed.
 - Documentation of this plan can proceed during that wait.
 - Keep changes local. Do not push, publish releases or create tags without an
   explicit request.
-- Commit completed work in cohesive commits using Conventional Commits with a
-  scope. Keep every subject and body line at or below 72 characters.
+- After GUI approval, use cohesive Conventional Commits with a scope. Keep
+  every subject and body line at or below 72 characters. Do not commit pending review work.
 - Use isolated tests first. Any local or Sandbox installation test must restore
   the state that existed before that test. Keep evidence and fixtures outside
   the repository; remove installed test components and stop test services.
@@ -96,17 +315,28 @@ the GUI was never launched on the host and no host stack was installed.
   actual validation and limitations in the relevant commit descriptions.
 - Update this document when a decision changes or a missing case is discovered.
 
-Implemented: unified commands, shared settings, the OpenCode strategy,
-scoped sessions, multiple local models, graphical setup and voice management.
+Implemented in this working change: native `whas` commands and shortcuts,
+shared settings, the OpenCode strategy, scoped contextual sessions,
+multiple local model selection, WPF setup/uninstall/use/configuration
+and voice management. Compatibility commands remain available. Opening setup
+without arguments shows its GUI; explicit console actions remain supported.
 
-Additional runtime integrations remain deferred pending agreement.
+Earlier validation: all 23 isolated suites passed. Focused follow-up tests passed for
+hidden-directory cleanup and GUI maintenance outside the installed directory.
+Runtime checks cover OpenCode routing, session separation and lifecycle
+validation. Sandbox evidence remains outside the repository.
 
 The 10,000-entry ownership fixture measured 158 ms cold and 9 ms cached in the
 final full suite. These measure ownership processing, not provider/model speed.
 Source and full-history secret scans passed; commit identities use a GitHub
 noreply address. Evidence and Sandbox files remain outside the repository.
 
-Additional runtime integrations remain deferred pending agreement.
+Decisions: use built-in WPF for the visible application and one shared runtime
+default. Settings
+are per installation with explicit request overrides, without an additional
+project configuration layer. Additional runtime integrations are deferred. Native history/memory management remains native; forgetting
+a WHAS association does not erase it. Real-provider latency comparisons and
+manual interactive GUI acceptance have not been performed in this run.
 
 ## 1. Fix the silent final installation stage first
 
@@ -332,8 +562,8 @@ memory across conversations and background autonomy are separate capabilities.
 ### Configuration sections and voice management
 
 Use separate GUI tabs with equivalent CLI configuration/menu access. Proposed
-sections are General, Agents, Models, Voice, and Sessions & Memory where supported.
-Final tab names can change without changing the shared configuration contract.
+sections are General, Workspaces, Models, Speech, Conversations and Maintenance.
+Engine defaults and voice management belong in Speech.
 
 - [x] Provide a Voice tab for available/installed TTS strategies, explicit
   install/uninstall actions, default engine and supported device selection.
@@ -363,7 +593,10 @@ Final tab names can change without changing the shared configuration contract.
 
 ### Existing behaviour to preserve
 
-Additional runtime integrations remain deferred pending agreement.
+The compatibility wrappers invoke `opencode run` without continuing a session.
+They provide one-shot use. Unified CLI chat supports native sessions and
+continuation. GUI local chat keeps its own Ollama message history.
+Additional runtime integrations require a separate agreed scope.
 
 ### Strategy contract
 
@@ -389,12 +622,24 @@ Additional runtime integrations remain deferred pending agreement.
 
 ### Sessions and memory
 
-Additional runtime integrations remain deferred pending agreement.
+- [x] Define new-chat, resume and explicit session selection semantics. Never
+  attach an unrelated conversation merely because it was the most recent one.
+- [x] Define session ownership and separation between users, projects, runtimes
+  and local/cloud use. Explain when previous messages will reach a provider.
+- [x] Separate saved transcripts from persistent memory across conversations.
+- [x] Make memory enablement, inspection, reset and deletion behaviour explicit.
+- [x] Define what uninstall preserves and what explicit personal-data deletion
+  removes. Include conversations, memories, skills and credentials as applicable.
+- [x] Keep private conversations, memory stores and credentials out of Git,
+  packaged setup assets, CI artifacts and routine diagnostic output.
+- [ ] Prove the contract with one additional runtime before implementing every
+  integration. The next runtime remains to be agreed.
+- [x] Write strategy authoring and per-runtime user guides.
 
 ## 5. Expand installer model selection
 
 Ollama already supports multiple installed models. Our wrappers can override the
-configured model; setup currently establishes one default managed model. There
+configured model; setup now prepares multiple selected models and saves one default. There
 is no need to invent a new model-switching system.
 
 - [x] Let setup select multiple models and choose the local default separately.
@@ -414,18 +659,19 @@ is no need to invent a new model-switching system.
 
 Build this after CLI/configuration/strategy contracts are stable. Select the
 Windows UI toolkit and source-install build/distribution approach deliberately;
-Decision: Windows Forms, compiled by source and bundled setup alike. Continue
+Decision: WPF presentation over the shared action controller, compiled by source
+and bundled setup alike. Continue
 documenting unsigned executable behaviour.
 
 ### Application entry points
 
-- `whas-setup.exe`: graphical installation, maintenance and uninstallation.
-- `whas-gui.exe`: everyday use with Settings accessible from inside the app.
+- `whas-gui.exe`: feature setup, everyday use, Settings and removal in one app.
 - `whas.exe`: full command-line use.
+- `whas-setup.exe`: optional legacy developer console build.
 
-The three-entry-point layout is a proposal, not a requirement to maintain four
-independent installer/uninstaller/configuration/usage applications. Start-menu
-shortcuts can open setup, settings or uninstall screens directly.
+The graphical app provides setup, settings, usage and removal in one window.
+The console build is optional and is not installed as a second graphical app.
+Start-menu shortcuts remain future work.
 
 ### Shared backend requirements
 
@@ -441,7 +687,7 @@ shortcuts can open setup, settings or uninstall screens directly.
 
 ### Installation screens
 
-1. Components: cloud, local and speech, plus optional agent runtimes.
+1. Components: cloud, local and speech. Additional agent runtimes are deferred.
 2. Models/engines: multiple selections, default choices and relevant download,
    hardware and licence information.
 3. Prerequisites for those selections: installed, missing or incompatible.
@@ -466,10 +712,86 @@ shortcuts can open setup, settings or uninstall screens directly.
 
 ## 7. Add graphical everyday use and settings
 
-- [ ] Provide one-shot questions, independent tasks and contextual conversations.
+### Configuration follow-up: 16 October 2026
+
+The installation wizard only serves first installation. The installed app
+uses direct maintenance actions rather than Continue/Next navigation:
+
+- [x] Show configured Cloud/Local routes and installed speech engines separately
+  from pending actions. Offer Add when absent, Repair and Remove when present.
+- [x] Keep each maintenance operation, its options, readiness results, preview
+  and Apply control together. Require a current check and preview before Apply.
+- [x] Explain removal boundaries: shared prerequisites, accounts, model files and
+  personal voice references are retained unless their own removal is requested.
+- [x] Give newly saved voices an explicit Make default option, plus a plainly
+  labelled Set this as default voice action and visible current default.
+- [x] Use bundled maintenance code for defaults so an older installed validator
+  cannot reject valid Chatterbox reference IDs.
+- [x] Replace the unstyled speech expander with themed, headed settings cards.
+- [x] Investigate successful speech returning exit 1; cover handled probe errors
+  and genuine speech errors separately. Every failed process must leave a
+  diagnostic in the activity log as well as its footer status.
+- [x] Test with isolated fixtures and build in background Sandbox; preserve the
+  user's installation and personal data. Scan the exact distributable and
+  clean up the owned Sandbox before committing.
+
+Implemented GUI refinements:
+
+Current follow-up acceptance checks:
+
+- [x] Shared settings dropdowns save once per user change; initial load, reload,
+  model/runtime discovery and failure rollback never submit extra writes.
+- [x] A failed save retains the previously saved value and reports the failure.
+- [x] Workspace and installation folder selection use the Windows Common Item
+  Dialog in folder mode, with a Select folder button and filesystem results.
+- [x] Speech panels follow strategy capabilities. Piper hides custom-reference
+  forms; F5 explains the required matching UTF-8 transcript before file choice
+  and displays its expected path and presence after choosing a WAV.
+- [x] Engine and saved-voice selection remain explicit default actions, labelled
+  Set default engine, Set this as default voice and Delete this voice.
+- [x] Progress stays in a permanently reserved bottom row. Cancel replaces Send
+  at the same width during requests; the activity log stays at the right edge.
+  Setup and configuration do not expose cancellation.
+- [x] Enter sends once; Shift+Enter inserts a line. Empty, busy and held-key Enter
+  events do not submit. Responses keep their border and use the canvas colour.
+
+- [x] System/Light/Dark appearance under General, with live system-theme updates.
+- [x] Compact multiline message input; Enter sends, Shift+Enter inserts a line.
+- [x] Current feature configuration shown with Add/Repair/Remove actions and
+  in-place maintenance options, checks, preview and apply controls.
+- [x] Show/Hide activity log with Clear log, preserving answers and running work.
+- [x] Saved workspaces all available to tasks, including subfolders, with
+  one starting folder for commands. Add/remove or change the starting folder
+  to start a new conversation; removing an entry never deletes files.
+- [x] Pass scoped OpenCode directory grants only in the task child, retain
+  task tool restrictions and existing provider/model settings, and
+  include saved folder paths in task context. Do not rewrite installed
+  configuration or use a common ancestor that grants unrelated siblings.
+- [x] Replace the installed sidebar with a top-right Configuration cog and a
+  Back control in the same position. Let responses fill the available window,
+  with a multiline placeholder composer and left/right control groups below.
+- [x] Split General, Workspaces and Models into separate tabs with headings;
+  group speech startup/hardware settings with engine and voice management,
+  using themed headings rather than an unstyled native expander.
+- [x] Stage custom voices as recording -> editable unique name -> Save voice.
+  File selection never submits, plays audio or changes a default. Keep failed
+  forms for correction and explain unsupported engines/transcript requirements.
+- [x] Separate saved-voice testing, per-engine default selection and deletion.
+  Guard built-in/current-default deletion and explain what each action changes.
+- [x] Use strategy-declared stored-file patterns for public voice IDs and default
+  validation. Handle legacy Chatterbox caches without renaming personal files;
+  use bundled maintenance code for compatible default changes and playback.
+- [x] Report service JSON errors rather than hiding them behind HTTP status text.
+- [x] Persist personal appearance/workspace preferences outside installation
+  records; retain shared CLI/provider/model configuration and reject stale saves.
+
+These refinements have isolated GUI workflow, backend and rendering coverage.
+They do not complete the broader installation/removal matrix below.
+
+- [x] Provide one-shot questions, independent tasks and contextual conversations.
 - [ ] Show effective runtime, provider and model with local/cloud selection.
-- [ ] Provide session creation/resumption and clearly expose memory behaviour.
-- [ ] Include TTS engine/voice selection and speech controls.
+- [x] Provide session creation/resumption and clearly expose memory behaviour.
+- [x] Include TTS engine/voice selection and speech controls.
 - [x] Open shared Settings from the usage app; never create a separate GUI config.
 - [ ] Present tool permission requests and failures faithfully. The GUI must not
   bypass permissions or claim a task completed when the backend failed.

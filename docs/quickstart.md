@@ -45,7 +45,7 @@ process only:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Check
 ```
 
-For a separately built EXE, use the [standalone EXE route](#standalone-exe-route).
+For graphical setup, use the [standalone EXE route](#standalone-exe-route).
 
 Review required `FAIL` results and any `WARN` messages. Add component flags only
 for a subset; see [check options](installation.md#prerequisite-checks).
@@ -124,7 +124,11 @@ If ordinary execution policy blocks it, use this instead:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The default local model is `qwen3:8b`; setup offers to download it if missing.
+The GUI offers installed Ollama models for reuse. If none are installed, it
+preselects `qwen2.5:1.5b` as a small starter (about 1 GB); you can choose another
+model. Local AI requires at least one selected model. Missing selected models
+are downloaded when you apply features; cloud-only setup downloads none.
+PowerShell/CLI setup retains its configured default (`qwen3:8b` when unchanged).
 For speech, choose one or more engines; the first is the default. Chatterbox is
 the initial default. F5 pretrained weights are for noncommercial use only.
 The default destination is `%USERPROFILE%\AI\WindowsHybridAgenticStack`.
@@ -140,7 +144,9 @@ compare its published checksum. See [verification](installation.md#unsigned-exe-
 
 The EXE is **unsigned**; read [Windows warnings and verification](installation.md#unsigned-exe-and-windows-warnings).
 Double-click `whas-gui.exe`. On first run, choose **Features**, models/engines,
-run **Prerequisites**, then review and **Apply selected features**. Once
+use **Check Prerequisites**, then the fixed **Go to Apply Features** button. On that
+page, read the automatically loaded plan (use **Check Again** to refresh), then use the fixed
+**Apply selected features** button. Once
 configured, the same application opens usage and settings. See the
 [graphical guide](gui.md). Use `install.ps1` for console setup.
 
@@ -158,7 +164,7 @@ whas askl "What is 2 plus 2?"
 ```
 
 ```powershell
-tts-say "Hello, the speech service is working."
+whas tts say "Hello, the speech service is working."
 ```
 
 ```powershell
@@ -169,8 +175,16 @@ The first speech request loads a model. See [engine management](tts-strategies.m
 and the [per-engine guides](tts-strategies.md#user-guides) for selection and custom voices.
 Use `whas configure` to change defaults. For contextual conversations use
 `whas chatl` or `whas chatc`; [session guidance](agent-strategies.md#sessions-and-memory)
-explains resumption and personal data. To use the GUI, open `whas-gui.exe` in
-your installation folder. Its Maintenance tab opens graphical uninstallation.
+explains resumption and personal data. CLI chat uses OpenCode; GUI chat on
+This PC uses Ollama directly with history kept in the current window.
+Open the repository or installed `whas-gui.exe` for graphical use, then use
+the top-right cog for **Configuration**. Choose **Maintenance > Removal**
+for whole-app uninstallation. Opening a newer repository EXE uses the existing
+installation but does not update its installed files; see [updates](gui.md#use-and-configure).
+
+For all commands and flags, open the [CLI reference](cli.md#complete-command-and-flag-reference).
+Installed help is `whas --help` for requests and `whas tts --help` or
+`tts-help` for speech.
 
 ## Uninstall
 
@@ -189,7 +203,8 @@ Apply with confirmation, including unchanged installer-created Ollama models:
 Add `-RetainManagedModels` to keep those models. If execution policy blocks the
 script, see the [temporary uninstall permission commands](installation.md#if-execution-policy-blocks-the-uninstall-script).
 
-Or open `whas-gui.exe`, select **Remove WHAS**, preview removal, choose whether
+Or open `whas-gui.exe`, go to **Configuration > Maintenance > Removal**,
+preview removal, choose whether
 to retain installer-created models, then confirm removal. Choose one uninstall
 route. Personal voices, modified/unknown files, original models and separately
 installed prerequisites are preserved. Read the cleanup receipt.
@@ -204,9 +219,9 @@ $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [En
 Then check command removal has succeeded:
 
 ```powershell
-Get-Command agent,localagent,tts-start -ErrorAction SilentlyContinue
+Get-Command whas -CommandType Application -ErrorAction SilentlyContinue
 ```
 
-No output means those commands are no longer discoverable, unless uninstall
+No output means the unified command is no longer discoverable, unless uninstall
 restored an earlier installation's registration. See [full removal details](installation.md#uninstallation)
 for custom paths and preservation rules, or [troubleshooting](troubleshooting.md).

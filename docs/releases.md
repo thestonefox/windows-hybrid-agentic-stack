@@ -11,7 +11,7 @@ dispatches. It uses Windows PowerShell 5.1 on a Windows runner, with Python 3.11
 for dependency-free backend tests. It does not install speech models, invoke a
 cloud AI provider or play audio.
 
-The workflow:
+The workflow definition:
 
 1. Runs isolated PowerShell and Python suites, and checks the bundled GUI's
    source fingerprint and checksum without executing it.
@@ -29,6 +29,13 @@ Defender file scan with signatures `1.461.53.0`, real-time protection enabled,
 zero detections and an unchanged hash. It was not executed on the host. This
 does not establish the cause of the earlier detection or guarantee safety.
 Do not disable protection, add exclusions or restore a blocked build to test it.
+
+The current GUI suites include Sandbox-only checks guarded by
+`WHAS_SANDBOX_TEST=1`. The workflow currently invokes `scripts/test.ps1`
+without that guest configuration, so it will stop at those guards. The new
+GUI suites have been run separately in a background Windows Sandbox; this
+does not mean the current GitHub workflow has passed. Integrate those suites
+into an appropriate isolated CI job before treating release automation as ready.
 
 After a successful run, open its **Actions** page and download the artifact from
 the **Artifacts** section. GitHub artifact downloads may require signing in.
@@ -78,13 +85,17 @@ assets. Review the draft and resolve an interrupted release deliberately.
 
 ## Build locally
 
-From the repository root in 64-bit Windows PowerShell 5.1:
+Run the full suite from a disposable Windows Sandbox guest with an unused
+WHAS registration, a writable source copy, Python 3.11 and 64-bit Windows
+PowerShell 5.1. Inside that guest, from the source root:
 
 ```powershell
+$env:WHAS_SANDBOX_TEST = '1'
 .\scripts\test.ps1
 ```
 
-This runs isolated tests, cleans successful GUID-named temporary fixtures and
+Set that marker only in the guest; it is a guard, not a sandboxing mechanism.
+The runner itself does not create a Sandbox. It runs isolated tests, cleans successful GUID-named temporary fixtures and
 retains logs outside the repository. Failed fixtures remain for investigation.
 Pass `-Python 'C:\Path\To\python.exe'` if Python is not on PATH.
 

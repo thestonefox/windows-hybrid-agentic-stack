@@ -46,21 +46,33 @@ This also applies to recognized legacy Chatterbox installations. After a complet
 
 Chatterbox remains the configured default. Interactive setup offers all three engines; unattended setup uses the configured/default engine unless `-TtsEngine` / `--tts-engine` overrides it. All three packages currently require 64-bit Python 3.11 and the Visual C++ x64 runtime.
 
+Per-engine setup device preferences can be supplied in source configuration:
+
+```json
+{"tts":{"deviceDefaults":{"chatterbox-turbo":"cuda","piper-tts":"cpu","f5-tts":"auto"}}}
+```
+
+These override `tts.device` for the named engine. `auto` is labelled Prefer GPU
+in setup: it uses GPU when detected and otherwise reports CPU fallback.
+The GUI presents independent
+choices; selecting a CPU-only engine does not restrict another engine's GPU
+choice. Runtime records store each installed engine's resolved device.
+
 ## Manage installed engines
 
 ```powershell
-tts-engine-list
+whas tts list
 ```
 
 List shows available/installed engines and the saved default and active engine.
 To add a catalog engine, stop speech first, then install it (with confirmation):
 
 ```powershell
-tts-stop
+whas tts stop
 ```
 
 ```powershell
-tts-engine-install piper-tts
+whas tts install piper-tts
 ```
 
 Use `--device cpu`, `--device cuda` or `--device auto` as supported by the
@@ -69,7 +81,7 @@ The installed, ownership-checked catalog supplies the installer; no arbitrary
 package URL is accepted. Adding an engine preserves the existing default.
 
 ```powershell
-tts-engine-default piper-tts
+whas tts default piper-tts
 ```
 
 The saved default lives in `tts/engines.json`. The `tts.engine` configuration
@@ -77,14 +89,17 @@ setting chooses the initial setup engine; this command does not rewrite it.
 
 With no argument, this prints the saved default. Changing it does not switch
 a running engine. Commands resolve explicit `--engine`, then the active engine,
-then the saved default:
+then the saved default. GUI Assistant replies explicitly use the saved default,
+so previewing another engine does not change subsequent Assistant speech.
+For the full command/flag list use `whas tts --help`, `tts-help` or
+the [speech reference](cli.md#speech-flags):
 
 ```powershell
-tts-start --engine f5-tts
+whas tts start --engine f5-tts
 ```
 
 ```powershell
-tts-voice-add -Path 'C:\Voices\sample.wav' -Name myvoice --engine f5-tts
+whas tts voice-add -Path 'C:\Voices\sample.wav' -Name myvoice --engine f5-tts
 ```
 
 Selection is checked before switching. Unknown engines, known uninstalled
@@ -96,13 +111,13 @@ speech, setup and uninstall operations on the same installation.
 Preview individual removal:
 
 ```powershell
-tts-engine-uninstall f5-tts
+whas tts uninstall f5-tts
 ```
 
 Apply with confirmation:
 
 ```powershell
-tts-engine-uninstall f5-tts --apply
+whas tts uninstall f5-tts --apply
 ```
 
 When removing the default and other installed engines remain, choose the
@@ -118,7 +133,7 @@ Piper uses `piper-tts` 1.8.0 and CPU ONNX Runtime in its own environment. Its Wi
 
 Model HTTPS downloads retain the system's trusted roots and add a pinned private Certifi CA bundle for fresh Windows installations. Certificate and hostname verification remain enabled. Setup does not modify Windows certificate stores, profiles or execution policies.
 
-`default` and `en_US-ljspeech-medium` select the same pre-trained voice. `tts-voice-list` lists both. Reference-recording add/remove operations are unsupported, so Piper is not a voice-cloning substitute for Chatterbox. Other models, languages, arbitrary ONNX imports and GPU support are outside this first package.
+`default` and `en_US-ljspeech-medium` select the same pre-trained voice. `whas tts voice-list` lists both. Reference-recording add/remove operations are unsupported, so Piper is not a voice-cloning substitute for Chatterbox. Other models, languages, arbitrary ONNX imports and GPU support are outside this first package.
 
 Piper's engine is GPL-3.0-or-later. The voice's upstream model card identifies its LJ Speech dataset as public domain; the exact model card is retained with the model rather than assigning it a different licence. Read [the package notice](../tts/strategies/piper-tts/NOTICE.md) for upstream source and licensing links. The setup EXE contains the adapter and download metadata; runtime wheels and voice weights are downloaded at install time.
 
@@ -133,10 +148,10 @@ CPU and NVIDIA CUDA 12.6 use separate PyTorch/Torchaudio 2.6.0 locks. The Window
 For a custom voice, prepare a mono WAV lasting 3-12 seconds and a UTF-8 text file containing the exact spoken words. Give the two files the same base name in the same directory, for example `speaker.wav` and `speaker.txt`, then run:
 
 ```powershell
-tts-voice-add -Name speaker -Path 'C:\Voices\speaker.wav'
-tts-say -Text 'Testing my reference voice.' -Voice speaker
-tts-voice-list
-tts-voice-remove -Name speaker
+whas tts voice-add -Name speaker -Path 'C:\Voices\speaker.wav' --engine f5-tts
+whas tts say -Text 'Testing my reference voice.' -Voice speaker --engine f5-tts
+whas tts voice-list --engine f5-tts
+whas tts voice-remove -Name speaker --engine f5-tts
 ```
 
 The strategy validates and copies both files into its personal voice directory. Missing, empty or oversized transcripts and invalid/silent recordings are rejected; duplicate voices are preserved. Adding a voice does not download Whisper or create a Python pickle. Removing a voice deletes its installed WAV/text pair. The main uninstaller invokes the installed F5 hook, removes unchanged owned environment/models/package files, and preserves personal recordings and transcripts. Completed uninstall/reinstall follows the shared ownership rules.
@@ -178,8 +193,8 @@ The factory receives `device`, `voices_directory` and `models_directory`. It ret
 | `add_voice(name, path)` | Optional reference-WAV registration when `voiceCloning` is true |
 | `remove_voice(name)` | Optional custom-voice removal when `voiceCloning` is true |
 
-The shared service owns loopback HTTP, bounded requests, voice-name validation, error responses, idle shutdown and readiness identity. The strategy owns model-specific inference and voice storage. `default` is reserved. Unsupported reference-voice operations return an explicit unsupported response. Existing voice and agent commands remain compatible. Native `tts-*` commands
-also accept `--engine ID`. Installed management commands execute ownership-checked
+The shared service owns loopback HTTP, bounded requests, voice-name validation, error responses, idle shutdown and readiness identity. The strategy owns model-specific inference and voice storage. `default` is reserved. Unsupported reference-voice operations return an explicit unsupported response. Existing voice and agent commands remain compatible. Unified speech and voice commands
+accept `--engine ID`. Installed management commands execute ownership-checked
 application scripts through the native host without loading profiles or changing
 execution policy. Enforced organisation restrictions still apply.
 
@@ -210,13 +225,24 @@ Keep actual test results, recordings, models, compiled installers and local mach
 A strategy supporting reference voices can declare:
 
 ```json
-"voiceReference": { "transcriptRequired": true }
+"voiceReference": {
+  "transcriptRequired": true,
+  "files": ["{name}.wav", "{name}.txt"]
+}
 ```
 
 This optional API-v1 field preserves existing manifests. It requests a matching
 UTF-8 `.txt` alongside the WAV, checked before switching or loading an engine.
 Without it, no transcript is required. The backend must still validate all
-inputs independently. Do not add engine-ID conditionals to shared commands.
+inputs independently. `files` declares the stored files required for a usable
+voice. The first pattern discovers names; every listed file must exist.
+Patterns start with literal `{name}` and end in `.wav`, `.pt` or `.txt`, with
+no directory components. Chatterbox declares `{"files":["{name}_prompt.pt"]}`
+inside its voiceReference object: the public name is `c3po`, even though the
+cache is `c3po_prompt.pt`. F5 requires the WAV/text pair. Discovery and default
+validation use these data-only patterns without loading an engine. Legacy
+installed Chatterbox packages have a compatibility fallback; new strategies
+must declare their storage layout rather than adding engine-ID conditionals.
 Include a user guide with examples, supported operations, required input files,
 licences, error remedies and uninstall behaviour when publishing a strategy.
 

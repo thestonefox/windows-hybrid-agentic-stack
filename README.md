@@ -21,19 +21,37 @@ warning. See [EXE setup and verification](docs/installation.md#standalone-execut
 
 ## Commands
 
+**[All CLI commands and flags](docs/cli.md#complete-command-and-flag-reference)**
+— request options, settings, speech, models, sessions and setup/removal options.
+
+```powershell
+whas --help
+whas tts --help
+tts-help
+```
+
+`tts-help` matches the standalone `tts-start` / `tts-say` command family.
+There is no bare `tts` command. New help commands require the updated installed
+command layer; use [shared app repair](docs/gui.md#use-and-configure) after updating.
+
 | Command | Purpose |
 |---|---|
-| `whas ask`, `askl`, `askc` | Independent restricted questions; default, local or cloud |
-| `whas perform`, `performl`, `performc` | Independent tool-enabled tasks |
-| `whas chat`, `chatl`, `chatc` | Contextual conversations |
+| `whas ask`, `whas askl`, `whas askc` | One-off questions without file or system tools |
+| `whas perform`, `whas performl`, `whas performc` | Independent tasks with file and system tools |
+| `whas chat`, `whas chatl`, `whas chatc` | Contextual conversations |
 | `whas configure` | Shared CLI and GUI settings |
-| `tts-say` | Generate and play speech locally |
+| `whas tts say` | Generate and play speech locally |
 
-Cloud commands inherit your OpenCode model selection by default. Add `-v` to an
-agent command, or `--voice` to `whas ask`/`perform`, to speak its response.
-The existing `agent`, `localagent`, `agentdo` and `localagentdo` commands remain
-available. Open `whas-gui.exe` in the installation folder for graphical use;
-the same graphical application handles first-run setup and complete removal.
+Cloud commands inherit your OpenCode model selection by default. Add `--voice`
+to `whas ask` or `whas perform` to speak its response. In the GUI, local chat
+uses Ollama directly and keeps conversation history in the window; Run a task
+uses OpenCode for file and system tools. CLI conversations use OpenCode sessions.
+
+Open the repository or installed `whas-gui.exe` for graphical use. Both find
+the registered installation and its configuration. Opening a newer repository
+EXE does not update an older installed EXE or command layer; see
+[updating the app](docs/gui.md#use-and-configure).
+Older launchers remain available for [compatibility](docs/cli.md#compatibility-commands).
 
 ## Documentation
 

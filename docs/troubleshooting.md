@@ -1,5 +1,44 @@
 # Troubleshooting
 
+## Local chat gives unrelated answers or feels slow
+
+Current GUI Conversation and One-off question on This PC call Ollama directly.
+Conversation resends completed message history; one-off questions send only
+their current question. Neither receives workspace prompts or file tools.
+Older GUI builds routed conversation through OpenCode and supplied folder
+instructions, which could distract smaller models and added startup work.
+Close the older window and open the updated repository EXE; a copy you made
+in the installation folder does not update itself. Start a new conversation
+to discard old context. Compare the same model and a fresh conversation when
+checking timing; model loading, history length and model parameters also affect it.
+
+## Local request returns no completed answer
+
+For GUI local chat, check that Ollama is running and the selected model appears
+in `ollama list`. The GUI displays Ollama connection, model and stream errors
+in the reply/activity log. It does not need OpenCode's model catalog for chat.
+
+CLI local requests and GUI Run a task still use OpenCode. WHAS adds selected
+Ollama models to each request's inline configuration without replacing saved
+provider/model definitions. Their failures include the runtime error or
+provider/model ID when OpenCode returns one. Opening a newer GUI alone does
+not replace an old installed backend; use [shared app repair](gui.md#use-and-configure).
+
+## A task mangles a folder path containing spaces
+
+An older command layer passed quoted prompts through Windows PowerShell 5.1's
+native argument binder. A message containing `"D:\Work\Web Projects\voices"`
+could arrive at OpenCode split into two arguments with its quotes removed.
+The current command layer encodes native arguments explicitly and preserves
+the full message, including quotes, spaces, backslashes and newlines.
+Update the installed command layer through [shared app repair](gui.md#use-and-configure).
+Opening a newer repository GUI alone does not replace old installed scripts.
+
+If an `external_directory` rejection contains a mangled path, compare it with
+the saved workspace; do not add the malformed path or grant a broader parent
+directory to work around it. Workspace permissions remain limited to the
+folders you saved and their subfolders.
+
 ## Windows blocks the unsigned EXE
 
 The setup EXE and installed command launchers are unsigned. SmartScreen may
@@ -7,6 +46,14 @@ show an unrecognized-app warning; Smart App Control or organisation policy may
 block execution entirely. See [unsigned EXE verification and Windows warnings](installation.md#unsigned-exe-and-windows-warnings)
 for checksum checks and what the warning means. Do not disable Windows
 protections or change execution policy to make the EXE run.
+
+## Unsupported speech device during setup
+
+Piper is CPU-only. Set device choices per engine under **Models & engines**:
+Chatterbox and F5 can use CUDA while Piper uses CPU. In source configuration,
+use `tts.deviceDefaults` to override the legacy `tts.device` fallback for
+individual engines. The EXE supports `--tts-devices chatterbox-turbo=cuda,piper-tts=cpu`.
+Unsupported per-engine choices fail before installation.
 
 ## Piper TTS
 
@@ -19,7 +66,7 @@ installations while retaining the system's trusted roots and full HTTPS
 verification. No Windows certificate-store change is required.
 
 The Piper voice is `default` (also named `en_US-ljspeech-medium`). It is a
-pre-trained English voice. `tts-voice-add` and `tts-voice-remove` are reference-WAV
+pre-trained English voice. `whas tts voice-add` and `whas tts voice-remove` are reference-WAV
 cloning operations and are unsupported by this package.
 
 Dependency hash failures, unavailable pinned wheels or model SHA256 mismatches
@@ -27,7 +74,8 @@ stop installation. Check network access to PyPI, files.pythonhosted.org and
 huggingface.co and retry. Do not remove hash checks or replace pinned assets
 with unrelated versions. Modified installed model files are preserved and
 rejected on repeat install. Use the main uninstaller and review its preservation
-receipt before reinstalling. Runtime paths are recorded in `tts/runtime.json`;
+receipt before reinstalling. Runtime paths are recorded in
+`tts/engines/ENGINE/runtime.json` (older single-engine installs may use `tts/runtime.json`);
 the shared speech service writes diagnostics under the installation's `tts`
 directory. See [TTS strategy packages](tts-strategies.md) for the package notice
 and current limitations.
@@ -48,7 +96,7 @@ The executable directory is `%USERPROFILE%\.windows-hybrid-agentic-stack\bin`. A
 Close and reopen the terminal application after installation. A new tab in an existing terminal may still inherit its old PATH. Inspect:
 
 ```powershell
-Get-Command agent,localagent,tts-start -CommandType Application
+Get-Command whas -CommandType Application
 Get-Content -LiteralPath (Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack\commands.json')
 Get-Content -LiteralPath (Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack\bin\install-root.txt')
 [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -70,6 +118,18 @@ To remove local registration, stop TTS and run `Unregister-StackCommands` using 
 Fresh installation writes no profile. Upgrading removes only recognised legacy stack blocks, with exact backups; unrelated profile code is preserved. Malformed, nested or duplicate markers stop migration for review. If startup still names a profile `.ps1`, inspect that file and its backups; it may contain unrelated scripts or blocks from an older installation. Do not change execution policy merely to suppress an obsolete stack loader error. Even an empty profile script can be rejected under Restricted.
 
 A missing local installation now produces an error only when a stack command is invoked. The second PC should remain free of stack startup code when the stack has never been registered there.
+
+### Uninstall rejects a registration backup name
+
+An older uninstall helper omitted `whas` from its list of permitted command
+backup names. After an app repair/update, a valid `whas.exe.bak.<32 hex digits>`
+record could therefore fail with **Invalid registration backup name** after
+ownership verification. This error occurs during preview/plan creation, before
+removal. Current code derives allowed names from the shared command registry,
+including `tts-help`, while retaining exact filename and hash verification.
+Use the updated repository GUI for removal, or the repository's `uninstall.ps1`
+with the existing installation path. Do not delete backups or ownership records
+to bypass the check. The ownership scan will run again.
 
 ### Uninstall preserves files or refuses removal
 
@@ -135,7 +195,8 @@ Open a new Windows PowerShell window after installation.
 Check the command registration:
 
 ```powershell
-Get-Command tts-start,tts-stop,tts-status,tts-say
+Get-Command whas -CommandType Application
+whas tts status
 ```
 
 If commands are missing, follow [Missing stack commands](#missing-stack-commands) above.
@@ -148,26 +209,33 @@ Check your NVIDIA GPU:
 nvidia-smi
 ```
 
-For Chatterbox, check CUDA availability using the installed strategy environment (adjust `$root` for a custom installation; older installations without `runtime.json` use the legacy root `.venv`):
+For Chatterbox, check CUDA availability using its installed strategy environment.
+Adjust `$root` for a custom installation. Older single-engine installations may
+use `tts/runtime.json`; still older Chatterbox installations use the root `.venv`:
 
 ```powershell
 $root = Join-Path $HOME 'AI\WindowsHybridAgenticStack'
-$runtime = Get-Content -LiteralPath (Join-Path $root 'tts/runtime.json') -Raw | ConvertFrom-Json
-$python = Join-Path (Join-Path $root $runtime.environmentPath) 'Scripts/python.exe'
+$runtimePath = Join-Path $root 'tts/engines/chatterbox-turbo/runtime.json'
+if (-not (Test-Path -LiteralPath $runtimePath)) { $runtimePath = Join-Path $root 'tts/runtime.json' }
+$environmentPath = '.venv'
+if (Test-Path -LiteralPath $runtimePath) { $environmentPath = (Get-Content -LiteralPath $runtimePath -Raw | ConvertFrom-Json).environmentPath }
+$python = Join-Path (Join-Path $root $environmentPath) 'Scripts/python.exe'
 & $python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
 ```
 
 If CUDA is unavailable, verify your driver and installed PyTorch build.
 
-### OpenCode commands are not recognised
+### OpenCode or agent commands are not recognised
 
 Open a new PowerShell window and check:
 
 ```powershell
-Get-Command agent,agentdo,localagent,localagentdo
+Get-Command whas,opencode -CommandType Application -ErrorAction SilentlyContinue
 ```
 
-Follow [Missing stack commands](#missing-stack-commands) above to inspect the local executable registration and PATH.
+If `whas` is missing, follow [Missing stack commands](#missing-stack-commands).
+If `opencode` is missing, install that separate prerequisite and refresh PATH;
+WHAS registration does not install it. GUI plain local chat uses Ollama directly.
 
 ### Perth watermarking fails during TTS startup
 
@@ -185,7 +253,15 @@ A model hash mismatch preserves the existing file and stops installation. Review
 
 ## Unified commands and graphical operations
 
-Additional runtime integrations remain deferred pending agreement.
+Speech help is `whas tts --help` or `tts-help`; there is no bare `tts` launcher.
+If new commands are missing, update installed files using shared app repair;
+opening a newer repository GUI alone does not update the registered CLI.
+
+
+`whas --help` lists the unified commands. A base-only installation has no default
+runtime until one is installed/selected. Use `whas agent list` to inspect runtime
+availability, then `whas configure --set runtime ID`. External OpenCode remains
+a separately installed prerequisite and manages provider authentication.
 
 An interactive native command shows activity during model waits, speech and
 large ownership operations. Piped answer output deliberately stays plain.
@@ -194,12 +270,14 @@ to first answer. Large Python/Node environments may contain tens of thousands
 of files. Scanning, hashing and removing those files can take several minutes.
 
 If a GUI operation fails, read the details and preserve the ownership record.
-Cancellation is not rollback. A cancelled installation/removal may leave files
+Only submitted assistant requests and their speech expose Cancel. Setup,
+maintenance and model discovery cannot be cancelled through the GUI.
+Cancellation is not rollback. A forcibly interrupted installation/removal may leave files
 for a repeat operation or reviewed cleanup. Do not change execution policy,
 delete metadata, disable integrity checks or remove unrelated Python/Ollama
 installations to repair it.
 
-Session continuation requires the same runtime, user, workspace and local/cloud
+CLI/cloud session continuation requires the same runtime, user, workspace and local/cloud
 route as its WHAS association. Start a new conversation when switching these.
 For external native sessions use the runtime's own session interface. Forgetting
 a WHAS association leaves native history and memory intact. See
@@ -207,4 +285,20 @@ a WHAS association leaves native history and memory intact. See
 
 The GUI reads shared settings when opened and through **Reload shared settings**.
 Reload after CLI edits before saving a conflicting edit. Voice lists also have
-an explicit refresh action; unsupported cloning operations stay disabled.
+an explicit refresh action; unsupported cloning panels are hidden.
+
+If a saved Chatterbox voice previews with HTTP 404, older inventories may have
+exposed `c3po_prompt` for a voice actually named `c3po`. Storage files such as
+`c3po_prompt.pt` do not make `_prompt` part of the public voice name. Reopen
+the updated GUI and refresh engines/voices. Existing recordings and caches
+remain usable; do not rename or recreate them to work around this mismatch.
+The GUI uses bundled maintenance code to save defaults and play speech even
+with an older installed command layer. The current CLI reports the service's error (such as Unknown voice)
+instead of only an HTTP status. A failed save keeps the staged file/name for
+correction; it does not automatically retry or overwrite an existing voice.
+
+If an older native CLI plays audio successfully but exits 1, update shared app
+files through **Configuration > Maintenance > Features > Repair shared app files**. Readiness
+probe errors that were caught internally previously counted as command errors.
+Current hosts distinguish handled probes from errors escaping the command.
+Real failures still open the activity log and include the exit code there.

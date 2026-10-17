@@ -20,7 +20,7 @@ Return to the [project overview](../README.md).
   - [Refresh PATH and check commands](#finish-installation-and-check-commands)
 - [Uninstallation](#uninstallation)
   - [Source-script removal](#uninstall-a-tracked-installation)
-  - [Standalone EXE removal](#uninstall-with-the-standalone-exe)
+  - [Graphical removal](#uninstall-with-the-graphical-application)
   - [What cleanup preserves](#what-cleanup-removes-and-preserves)
   - [Refresh PATH and check removal](#refresh-path-and-check-removal)
 - [Using the AI agents](#using-the-ai-agents)
@@ -98,8 +98,10 @@ is `%USERPROFILE%\AI\WindowsHybridAgenticStack`.
 
 #### If you already have the standalone EXE
 
-Keep it in a separate folder such as Downloads, outside the stack installation
-directory. In PowerShell, move into that folder, for example:
+You can run it from the extracted repository, Downloads or the installation
+folder. It discovers the active installation through local command registration;
+its containing folder does not choose a different configuration. In PowerShell,
+move into its containing folder, for example:
 
 ```powershell
 Set-Location -LiteralPath "$HOME\Downloads"
@@ -197,7 +199,7 @@ You only need the prerequisites for the components you intend to install.
 
 Cloud-only agents do not require Python or Ollama. Voice-only installation does not require OpenCode or Ollama.
 
-The project installer manages the selected TTS strategy's private Python environment, model and dependencies: PyTorch for Chatterbox/F5, or CPU ONNX Runtime for Piper. External applications such as Python, OpenCode, and Ollama must be installed separately.
+The project installer manages the selected TTS strategy's private Python environment, model and dependencies: PyTorch for Chatterbox/F5, or CPU ONNX Runtime for Piper. External applications such as Python, OpenCode and Ollama are installed separately from the stack; use the GUI's WinGet action or the manual installation instructions below.
 
 ### Installing prerequisites
 
@@ -242,6 +244,8 @@ update saved user PATH and their own process environment, but a setup EXE or
 child PowerShell process cannot update the already-open parent terminal's
 environment. Refresh in the terminal where you want to use or check commands.
 No PowerShell profile reload is needed; the stack commands do not use a profile.
+
+The GUI prerequisite page offers **Open download page** and **Install with WinGet** for supported missing dependencies. The WinGet action installs that package, accepts source and package agreements, logs output, and rechecks prerequisites after success. Windows may ask for administrator approval. If WinGet is unavailable or installation fails, use the download page and select **Check Again** after installing. NVIDIA drivers remain a manual download.
 
 #### 1. Check WinGet
 
@@ -372,7 +376,11 @@ List downloaded models:
 ollama list
 ```
 
-The built-in local model default is `qwen3:8b`. The installer checks whether the configured model is available and offers to download it if necessary.
+The GUI offers installed Ollama models for reuse. If none are installed, it
+preselects `qwen2.5:1.5b` as a small starter (about 1 GB); you can choose another
+model. Local AI requires at least one selected model. Missing selected models
+are downloaded when you apply features; cloud-only setup downloads none.
+PowerShell/CLI setup retains its configured default (`qwen3:8b` when unchanged).
 
 To download the default model manually:
 
@@ -414,11 +422,16 @@ You can optionally override individual settings using:
 config/config.json
 ```
 
-The user-specific configuration file is excluded from Git.
+The user-specific configuration file is excluded from Git. Before installation,
+these paths refer to the source checkout and control setup. Afterwards, the
+active settings live in the installation's `config/config.json`; use
+**Configuration** in the GUI or `whas configure` to change them. Editing the
+checkout's file does not update the installed copy.
 
 #### Create a configuration file
 
-Copy the example:
+For a new source configuration, copy the example. If `config/config.json`
+already exists, edit that file instead of replacing it:
 
 ```powershell
 Copy-Item .\config\config.json.example .\config\config.json
@@ -452,7 +465,11 @@ It validates settings and rejects unsupported or unknown values.
 
 #### Cloud model selection
 
-`agent` and `agentdo` use OpenCode model selection by default: its configured model, then its last-used model, then its own fallback. The wrapper does not choose a provider based on login. `--model provider/model` overrides one invocation.
+Cloud requests inherit OpenCode's model selection unless WHAS has a saved
+override. Signing in does not choose a model. `whas askc --model provider/model
+"Your question"` overrides one invocation; use a model ID actually available
+to your connected provider. After installation, use **Configuration > Models**
+or `whas configure --set cloud.model provider/model` to save an override.
 
 For a persistent stack override, set `agents.cloud.model` to a fully qualified `provider/model` ID. The optional `agents.cloud.provider` supports shorter model names. Both default to `null`; local commands continue to select their configured Ollama model explicitly.
 
@@ -475,7 +492,14 @@ For example, to select the source model and context size in `config/config.json`
 }
 ```
 
-When `-Local` is selected, the installer checks for the original Ollama model and creates a **separate managed model** whose Modelfile includes `PARAMETER num_ctx 16384`. For `qwen3:8b`, the generated name is `whas-qwen3-8b-ctx16384`. `localagent` and `localagentdo` use that model automatically; the original `qwen3:8b` remains unchanged.
+When `-Local` is selected, the installer checks for the original Ollama model and
+creates a **separate managed model** whose Modelfile includes `PARAMETER num_ctx
+16384`. For `qwen3:8b`, the generated name is `whas-qwen3-8b-ctx16384`. Setup
+saves that alias as the local model used by local requests; the original
+`qwen3:8b` remains unchanged. Choosing a different installed model afterwards
+uses that exact model and its parameters; it does not create another alias.
+GUI Conversation and One-off question call Ollama directly; tasks and CLI
+requests use OpenCode. See [local model selection](cli.md#local-model-selection).
 
 The generated name is based on the exact configured source model and context size. For example, choosing the already customised source `qwen3-8b-16k` produces `whas-qwen3-8b-16k-ctx16384`. Prefer selecting the original model when no other customisations are needed.
 
@@ -560,8 +584,8 @@ Once built, the EXE can install under an ordinary `Restricted` policy without
 this option. Source-script uninstall has its own temporary-permission examples
 in [Uninstallation](#uninstallation).
 
-You do **not** need temporary permission each time you use installed `agent`,
-`localagent` or `tts-*` commands. They are native executables, and runtime
+You do **not** need temporary permission each time you use installed `whas`
+commands. They are native executables, and runtime
 tests pass under ordinary `Restricted` policy without changing it.
 This does not grant an AI agent permission to execute arbitrary `.ps1` files:
 scripts it launches still follow the policy of the process running them.
@@ -575,6 +599,19 @@ See Microsoft's [execution-policy documentation](https://learn.microsoft.com/en-
 for process scope and policy precedence.
 
 ### TTS engine strategies
+
+In graphical setup, select the device separately for each selected speech
+engine under **Models & engines**. Chatterbox and F5 offer CPU and Prefer GPU;
+Prefer GPU uses CUDA when a compatible NVIDIA GPU is detected and falls back
+to CPU otherwise. Piper is CPU-only and has no device selector. The EXE accepts
+`--tts-devices chatterbox-turbo=cuda,piper-tts=cpu` with `--voice` and the matching
+`--tts-engine` selection. Source configuration uses `tts.deviceDefaults`, keyed
+by engine ID; `tts.device` remains the fallback for engines without an override.
+Selections are validated per engine. The internal `auto` value corresponds to
+Prefer GPU and checks that engine's supported
+devices and available hardware. Actual resolved devices are saved separately
+in `tts/engines/ENGINE/runtime.json`. Changing setup choices does not convert an
+already installed environment; existing device/environment checks still apply.
 
 Chatterbox Turbo, Piper TTS and F5-TTS are bundled strategies. TTS packages are discovered from `tts/strategies/<id>/`; additional trusted packages can supply their own installation, backend and uninstall behavior. Source and standalone setup support explicit engine selection:
 
@@ -726,7 +763,7 @@ Depending on the selected components, the installer:
 - Creates or reuses a separate Ollama variant with the configured context window.
 - Installs Windows PowerShell 5.1-specific agent instructions without discarding existing instructions.
 - Installs `ps-read` and `ps-write` agent permissions.
-- Registers PowerShell agent commands.
+- Registers the unified native `whas` launcher and compatibility launchers.
 - Creates an isolated Python 3.11 environment for the selected TTS strategy.
 - Selects supported CPU/CUDA execution for the chosen TTS strategy.
 - Installs the selected TTS engine and its pinned dependencies and models.
@@ -762,7 +799,7 @@ Each PC has one active root. Selecting another `-InstallPath` switches local reg
 
 ### Finish installation and check commands
 
-Both source and EXE installations include the unified `whas` command,
+Both source and EXE installations include the unified `whas` command and
 `whas-gui.exe` for usage, configuration and graphical removal in the
 installation folder. See [graphical workflows](gui.md) and
 [shared CLI settings](cli.md). Opening setup without arguments shows its GUI;
@@ -786,7 +823,7 @@ is required. The installer process cannot update its parent terminal's PATH.
 Check which commands are available:
 
 ```powershell
-Get-Command agent,localagent,tts-start -ErrorAction SilentlyContinue
+Get-Command whas -CommandType Application -ErrorAction SilentlyContinue
 ```
 
 Registration supplies the common command names; their presence does not mean
@@ -867,8 +904,8 @@ policies still apply; see [execution-policy guidance](#powershell-execution-poli
 
 ### Uninstall with the graphical application
 
-Open `whas-gui.exe` and choose **Remove WHAS**, or navigate there through
-**Maintenance**. Preview removal, choose whether to retain installer-created
+Open `whas-gui.exe` and use the top-right cog, then
+**Configuration > Maintenance > Removal**. Preview removal, choose whether to retain installer-created
 Ollama models, then confirm removal. This uses the same ownership checks,
 strategy hooks and retention rules as the source uninstaller.
 
@@ -903,116 +940,120 @@ $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [En
 Then check command removal:
 
 ```powershell
-Get-Command agent,localagent,tts-start -ErrorAction SilentlyContinue
+Get-Command whas -CommandType Application -ErrorAction SilentlyContinue
 ```
 
-No output means those commands are no longer discoverable. If uninstall
+No output means the unified command is no longer discoverable. If uninstall
 restored a previous installation's registration, its commands may still be
 listed. Read the uninstall receipt for removed and retained files/models;
 personal data can leave the installation directory in place.
 
 ## Using the AI agents
 
+The [complete command and flag reference](cli.md#complete-command-and-flag-reference)
+lists every WHAS request, speech and setup option. Run `whas --help` for
+requests and `whas tts --help` or `tts-help` for speech help.
+
+
 After installation, refresh PATH as described above or reopen your terminal
-application.
+application. The unified interface is `whas`:
 
-The project provides four commands:
+| Operation | Saved route | This PC | Cloud |
+|---|---|---|---|
+| One-off question, no file/system tools | `whas ask` | `whas askl` | `whas askc` |
+| Task with file/system tools | `whas perform` | `whas performl` | `whas performc` |
+| Contextual CLI conversation | `whas chat` | `whas chatl` | `whas chatc` |
 
-| Command | Model | Permissions |
-|---|---|---|
-| `agent` | Cloud | Read-only |
-| `agentdo` | Cloud | Write-capable |
-| `localagent` | Ollama | Read-only |
-| `localagentdo` | Ollama | Write-capable |
-
-Examples:
+Choose the working folder before running a task. For example, from a folder
+where you want a notes file:
 
 ```powershell
-agent "Explain the difference between RAM and storage"
+whas askc "Explain the difference between RAM and storage"
 ```
 
 ```powershell
-agentdo "Create a notes.txt file in the current directory"
+whas askl "What is 2 plus 2?"
 ```
 
 ```powershell
-localagent "Explain this PowerShell script"
+whas performl "Create notes.txt in the current directory containing Hello"
 ```
 
 ```powershell
-localagentdo "Create a summary.txt file in the current directory"
+whas chatc --no-voice
 ```
+
+CLI conversations use OpenCode's interactive interface and native session
+history. The GUI has its own Conversation mode: on This PC it sends message
+history directly to Ollama, without file tools or OpenCode startup. Only
+Run a task receives the saved workspace folders and file/system tools. See
+[conversations and sessions](agent-strategies.md#sessions-and-memory).
 
 ### Agent options
 
-All four commands support the same options:
-
 | Option | Behaviour |
 |---|---|
-| `-m MODEL`, `--model MODEL` | Override the model for this invocation |
-| `-l`, `--log` | Show full OpenCode output |
-| `-h`, `--help` | Show usage information |
-| `-v`, `--voice` | Speak the final answer using the selected engine |
+| `--local`, `--cloud` | Override the saved route; equivalent to the `l`/`c` suffix |
+| `--runtime ID` | Override the runtime for this request |
+| `--model MODEL` | Override the model for this request |
+| `--log` | Show native OpenCode events for one-off questions and tasks |
+| `--voice`, `--no-voice` | Enable or disable speech for one-off questions and tasks |
+| `--session ID` | Continue a registered CLI chat session |
+| `--new` | Start a new CLI chat, the default |
 
-Examples:
+Use an installed model, for example:
 
 ```powershell
-localagent -m qwen3:0.6b "What is 2 plus 2?"
+whas askl --model ollama/qwen2.5:1.5b "What is 2 plus 2?"
 ```
 
 ```powershell
-agent --model openai/gpt-6-luna "Explain this error"
+whas performl --log "Report total system RAM in GB"
 ```
 
-```powershell
-localagent --log "Explain this PowerShell command"
-```
-
-```powershell
-agentdo --help
-```
+`whas --help` lists the unified interface. Session options only apply to chat;
+interactive CLI chat does not support speech, so use `--no-voice` when speech
+is enabled in your saved defaults. For settings and the differences from the
+older launchers, see [CLI reference](cli.md).
 
 ### Speaking agent responses
 
-To speak a response using the configured default voice:
-
 ```powershell
-agent -v "Explain gravity"
+whas askc --voice "Explain gravity in one sentence"
 ```
 
 ```powershell
-localagent -v "What is 2 plus 2?"
+whas askl --voice "What is 2 plus 2?"
 ```
 
-To select a custom voice:
+`--voice` uses the selected engine's saved voice; it does not take a voice
+name. To save a custom voice for an engine after adding it:
 
 ```powershell
-agent -v myvoice "Explain gravity"
+whas configure --set speech.voice myvoice --engine chatterbox-turbo
 ```
 
-The voice name comes immediately after `-v`, followed by the prompt.
-
-Voice output can also be combined with full logging:
-
-```powershell
-localagent -v -l "What is 2 plus 2?"
-```
-
-The command displays the OpenCode events and passes the final answer to the selected speech engine.
-
-**Native cloud and local voice commands generated valid 24 kHz WAV files, completed playback and returned normally on the reference machine. The user confirmed hearing both responses. Earlier profile-registration tests are retained as historical results.**
+Choose the default engine separately with `whas tts default chatterbox-turbo`.
+GUI **Speak the answer** also works for completed Conversation replies.
+Speech startup, synthesis and playback can take time independently of text
+generation. A speech failure does not discard the displayed GUI answer.
 
 ### Agent permissions
 
-`ps-read` is designed for read-only interactions and denies command execution and file editing.
+Questions and conversations have no file or system tools. OpenCode requests
+use a managed `whas-chat` profile with tools denied; GUI local chat talks to
+Ollama directly. Use `perform` or **Run a task** to inspect live system state,
+read files or make changes. These tasks use `ps-write` and OpenCode's permission
+system, not an operating-system sandbox. Requests outside permitted folders
+can require approval or be rejected.
 
-`ps-write` allows execution and editing within OpenCode's permission system.
+The compatibility `agent`/`localagent` launchers retain their older read-only
+`ps-read` behaviour. They are not exact permission-equivalent aliases for
+`whas ask`; see [compatibility commands](cli.md#compatibility-commands).
 
-Other OpenCode restrictions remain active. For example, an operation outside the working directory may require approval or be rejected.
-
-The supplied agent instructions target Windows PowerShell 5.1 and do not depend on WSL, Git Bash, or PowerShell 7. They direct agents to prefer native Windows commands, inspect execution errors, verify results before claiming success, convert memory units correctly, and respect exact file-content requests.
-
-These instructions improve reliability but do not guarantee that smaller local models will always choose correct commands or obey every request. Read-only protection is enforced through OpenCode agent permissions as well as being described in the instructions.
+Task instructions target Windows PowerShell 5.1 and direct the model to inspect
+errors and verify results. They do not guarantee that a smaller local model
+will always choose correct commands or obey every request.
 
 ### OpenCode configuration isolation
 
@@ -1026,52 +1067,53 @@ This is separate from the user's global OpenCode configuration.
 
 Agent commands temporarily use the stack-specific configuration and restore the previous environment setting afterward.
 
-To inspect the installed model configuration manually:
+To list the cloud model IDs visible through the installed configuration:
 
 ```powershell
-$env:OPENCODE_CONFIG = Join-Path $HOME 'AI\WindowsHybridAgenticStack\opencode.json'
-```
-
-```powershell
-opencode models
+whas model catalog --cloud
 ```
 
 Listing a model confirms configuration visibility, not successful model inference or authentication.
 
 ## TTS commands
 
+Run `whas tts --help` or `tts-help` for speech commands and their flags.
+There is no bare `tts` launcher. See the [speech flag reference](cli.md#speech-flags).
+
+
 After voice installation, refresh PATH as described above or reopen your
 terminal application.
 
-The installer registers the following commands:
+The unified speech commands are below. Older `tts-*` launchers remain
+available for [compatibility](cli.md#compatibility-commands).
 
 | Command | Purpose |
 |---|---|
-| `tts-start` | Start the selected speech engine |
-| `tts-stop` | Stop the selected speech engine |
-| `tts-status` | Display service status |
-| `tts-say` | Generate and play speech |
-| `tts-voice-list` | List locally cached voices |
-| `tts-voice-add` | Create a voice profile from a WAV reference |
-| `tts-voice-remove` | Remove a custom voice profile |
-| `tts-voice-test` | Test a custom voice |
-| `tts-engine-list` | Show available, installed, default and active engines |
-| `tts-engine-install` | Install another catalog engine |
-| `tts-engine-uninstall` | Preview or apply removal of one engine |
-| `tts-engine-default` | Show or set the saved default engine |
+| `whas tts start` | Start the selected speech engine |
+| `whas tts stop` | Stop the selected speech engine |
+| `whas tts status` | Display service status |
+| `whas tts say` | Generate and play speech |
+| `whas tts voice-list` | List locally cached voices |
+| `whas tts voice-add` | Create a voice profile from a WAV reference |
+| `whas tts voice-remove` | Remove a custom voice profile |
+| `whas tts voice-test` | Test a custom voice |
+| `whas tts list` | Show available, installed, default and active engines |
+| `whas tts install` | Install another catalog engine |
+| `whas tts uninstall` | Preview or apply removal of one engine |
+| `whas tts default` | Show or set the saved default engine |
 
 ### Start and stop the service
 
 ```powershell
-tts-start
+whas tts start
 ```
 
 ```powershell
-tts-status
+whas tts status
 ```
 
 ```powershell
-tts-stop
+whas tts stop
 ```
 
 When automatic startup is enabled, requesting speech starts the service if it is not already running.
@@ -1088,13 +1130,13 @@ See [engine management](tts-strategies.md#manage-installed-engines) and the
 ### Generate speech
 
 ```powershell
-tts-say "Hello, this is a test of Chatterbox Turbo."
+whas tts say "Hello, this is a test of Chatterbox Turbo."
 ```
 
 To specify a voice using PowerShell parameters:
 
 ```powershell
-tts-say -Text "Hello from my custom voice." -Voice "myvoice"
+whas tts say -Text "Hello from my custom voice." -Voice "myvoice"
 ```
 
 ### Manage voices
@@ -1102,28 +1144,39 @@ tts-say -Text "Hello from my custom voice." -Voice "myvoice"
 List available voices:
 
 ```powershell
-tts-voice-list
+whas tts voice-list
 ```
 
 Create a custom voice from a suitable WAV recording (Chatterbox; F5 also needs a matching transcript as described in [TTS strategies](tts-strategies.md); Piper uses its pre-trained voice):
 
 ```powershell
-tts-voice-add -Path 'C:\VoiceSamples\sample.wav' -Name 'myvoice'
+whas tts voice-add -Path 'C:\VoiceSamples\sample.wav' -Name 'myvoice' --engine chatterbox-turbo
 ```
 
 Test a custom voice:
 
 ```powershell
-tts-voice-test myvoice
+whas tts voice-test myvoice --engine chatterbox-turbo
 ```
+
+Adding or testing a voice does not select it for future answers. Save the
+default voice for its engine explicitly, for example:
+
+```powershell
+whas configure --set speech.voice myvoice --engine chatterbox-turbo
+```
+
+This selects a voice for Chatterbox; it does not change the default engine.
+Use `whas tts default chatterbox-turbo` to choose that separately.
 
 Remove a custom voice:
 
 ```powershell
-tts-voice-remove myvoice
+whas tts voice-remove myvoice --engine chatterbox-turbo
 ```
 
-Custom voices are stored inside the stack installation's `voices` directory.
+New installations store custom voices under `voices/ENGINE` inside the stack
+installation. Recognized older Chatterbox layouts can retain their legacy paths.
 
 The built-in `default` voice is reserved and cannot be removed.
 
@@ -1137,7 +1190,7 @@ See [Troubleshooting](troubleshooting.md) for installation, PowerShell, Ollama, 
 
 ### Remove command registration on one PC
 
-Stop any running TTS service with `tts-stop`, then run from the repository root in a context permitted to run maintenance scripts:
+Stop any running TTS service with `whas tts stop`, then run from the repository root in a context permitted to run maintenance scripts:
 
 ```powershell
 . .\scripts\command-registration.ps1
@@ -1169,7 +1222,7 @@ Tests cover portable embedded assets, poisoned sidecars, Restricted execution, l
 
 Ownership hashing now streams bytes directly through SHA-256, uses filesystem path combination after validating relative paths, classifies generated files once per plan and avoids repeatedly copying the growing deletion receipt. Full plan revalidation and the hash check immediately before each file removal remain in place. Ordinary owned files still reject concurrent writers; recognized generated logs support shared reads until speech stops.
 
-On the reference PC in Windows PowerShell 5.1, an isolated fixture of 2,000 files of 4 KiB each plus one 64 MiB binary produced these timings, comparing commit `0418803` with the optimized implementation:
+On the reference PC in Windows PowerShell 5.1, an isolated fixture of 2,000 files of 4 KiB each plus one 64 MiB binary produced these historical timings, comparing the earlier implementation with the optimized implementation. The original commit IDs predate the repository history cleanup and are no longer resolvable here:
 
 | Operation | Before | After |
 | --- | ---: | ---: |
@@ -1180,7 +1233,7 @@ On the reference PC in Windows PowerShell 5.1, an isolated fixture of 2,000 file
 
 The measured cleanup improvement was about 2.3 times. A larger optimized fixture of 46,641 small files plus one 64 MiB binary also completed: hashing 12.40 s, ownership recording 24.30 s, preview 35.33 s and cleanup 165.76 s. These fixtures measure file-count overhead; they do not reproduce the bytes, disk throughput or running services of a complete CUDA installation. Full cleanup can still take several minutes.
 
-The optimized code at commit `5307d7c` subsequently passed a full physical-PC cloud/local/CUDA voice installation and installed-CLI uninstall. Cloud and local inference succeeded, the user confirmed audible speech, and all 35 checks passed after classifying a transient installer pip worker separately from unrelated processes. The installed preview took 51.01 s; applying the installed uninstaller took 267.93 s, including plan creation and revalidation, and removed 46,685 files and only the test-created model. The installed helpers matched the committed source, speech was stopped by uninstall, and the user confirmed clean startup in a new PowerShell window afterward. No helper patching or separate speech shutdown was needed. See [controlled test and rollback procedure](install-test-rollback.md).
+That optimized revision subsequently passed a full physical-PC cloud/local/CUDA voice installation and installed-CLI uninstall. Cloud and local inference succeeded, the user confirmed audible speech, and all 35 checks passed after classifying a transient installer pip worker separately from unrelated processes. The installed preview took 51.01 s; applying the installed uninstaller took 267.93 s, including plan creation and revalidation, and removed 46,685 files and only the test-created model. The installed helpers matched that revision's source, speech was stopped by uninstall, and the user confirmed clean startup in a new PowerShell window afterward. No helper patching or separate speech shutdown was needed. These are historical results, not a test of the current GUI. See [controlled test and rollback procedure](install-test-rollback.md).
 
 Reproduce the measurements without installing components, starting services, downloading models or changing persistent PATH:
 

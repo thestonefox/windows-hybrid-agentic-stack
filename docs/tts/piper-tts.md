@@ -19,11 +19,11 @@ From the repository root:
 If speech management is already installed:
 
 ```powershell
-tts-stop
+whas tts stop
 ```
 
 ```powershell
-tts-engine-install piper-tts
+whas tts install piper-tts
 ```
 
 See [installation](../installation.md) for prerequisites, source-script
@@ -32,18 +32,18 @@ permission and the equivalent EXE route.
 ## Start and speak
 
 ```powershell
-tts-start --engine piper-tts
+whas tts start --engine piper-tts
 ```
 
 ```powershell
-tts-say -Text 'Hello from Piper.' --engine piper-tts
+whas tts say -Text 'Hello from Piper.' --engine piper-tts
 ```
 
 ```powershell
-tts-voice-list --engine piper-tts
+whas tts voice-list --engine piper-tts
 ```
 
-`tts-voice-add` and `tts-voice-remove` return an explicit unsupported-operation
+`whas tts voice-add` and `whas tts voice-remove` return an explicit unsupported-operation
 error for Piper. Switching to Piper does not convert another engine's custom
 voice profiles. Use `default` or `en_US-ljspeech-medium` when selecting a voice.
 
@@ -51,7 +51,7 @@ Only one engine runs at a time. Selecting Piper stops a different active engine
 but does not change the saved default. To save it as default:
 
 ```powershell
-tts-engine-default piper-tts
+whas tts default piper-tts
 ```
 
 ## Remove the engine
@@ -59,13 +59,13 @@ tts-engine-default piper-tts
 Preview:
 
 ```powershell
-tts-engine-uninstall piper-tts
+whas tts uninstall piper-tts
 ```
 
 Apply:
 
 ```powershell
-tts-engine-uninstall piper-tts --apply
+whas tts uninstall piper-tts --apply
 ```
 
 When removing the default while another engine remains, add

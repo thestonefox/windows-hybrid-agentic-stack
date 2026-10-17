@@ -1,13 +1,23 @@
 # Agent runtimes and strategy authoring
 
-WHAS separates runtime selection from model selection. OpenCode is the
-shipped adapter for questions, tool-enabled tasks and contextual sessions.
+WHAS separates runtime selection from model selection. OpenCode is the default
+adapter for questions without tools, tool-enabled tasks and CLI sessions.
+OpenCode is the only shipped runtime. Additional integrations require a
+separate agreed scope. Authentication stays in OpenCode's own storage.
+
+GUI Conversation and One-off question on This PC use Ollama's chat API
+directly, without an agent runtime or file tools. The GUI sends completed
+user/assistant turns as message history for Conversation; one-off questions
+send only their current message. This history lasts for the current window
+and does not use an OpenCode session ID. Run a task still uses OpenCode.
 
 ## OpenCode
 
 Install the external OpenCode prerequisite through the
 [installation guide](installation.md#5-install-opencode-cloud-or-local-agents).
-WHAS configures its own read/task agents without replacing your global config.
+WHAS installs the compatibility read agent and task agent without replacing
+your global config. Unified questions and CLI/cloud conversations use a
+per-request `whas-chat` profile with tools denied.
 It preserves OpenCode's native provider/model selection unless overridden.
 
 ```powershell
@@ -19,19 +29,18 @@ whas agent check opencode
 ```
 
 ```powershell
-whas chatc --runtime opencode
+whas chatc --runtime opencode --no-voice
 ```
 
 This opens the native interactive CLI in the current terminal. One-shot
 `ask`/`perform` calls do not automatically continue earlier sessions.
 WHAS uninstall does not remove this external prerequisite or its account data.
 
-
 ## Sessions and memory
 
 Native interactive chat starts a new conversation unless a registered session
 is explicitly selected. WHAS does not use a global "continue most recent" flag.
-For a machine-readable turn, used by the GUI:
+For a machine-readable turn, also used by cloud chat in the GUI:
 
 ```powershell
 whas chatl --runtime opencode --message "Remember this number: 42"
@@ -51,7 +60,12 @@ Unknown/external IDs must be inspected through the native runtime; there is no
 automatic adoption. Native interactive sessions that do not return an ID cannot
 be registered by WHAS automatically. Their native history remains available.
 
-Additional runtime integrations remain deferred pending agreement.
+Resuming a native session, or sending the next local GUI conversation message,
+sends its previous messages to the selected provider. One-off questions do
+not use or update the GUI conversation history. Changing the GUI route/model,
+starting a new conversation or closing the window clears its local context.
+Persistent memory across conversations is a separate native feature. OpenCode
+keeps its own native storage; WHAS does not provide a shared memory service.
 
 ```powershell
 whas session list
@@ -102,8 +116,8 @@ Install receives `Root`; uninstall receives `Context` containing `InstallPath`
 and `RuntimeId`. Pin/check upstream code, isolate dependencies under
 `agents/runtime/ID`, use ownership tracking, record interrupted installs where
 possible and keep personal data under `agents/data` or an excluded native
-`home/profiles` tree. Restore temporary process variables and PATH changes.
-Do not install services implicitly.
+`home/profiles` tree. Restore process variables
+and any temporary PATH effects. Do not install services implicitly.
 
 Hooks execute through the verified script loader. Native hosts parse scripts
 with their real file identity, so script-relative paths work without changing
