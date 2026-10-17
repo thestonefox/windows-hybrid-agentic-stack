@@ -23,7 +23,7 @@ Return to the [project overview](../README.md).
   - [Graphical removal](#uninstall-with-the-graphical-application)
   - [What cleanup preserves](#what-cleanup-removes-and-preserves)
   - [Refresh PATH and check removal](#refresh-path-and-check-removal)
-- [Using the AI agents](#using-the-ai-agents)
+- [Use WHAS: ask, chat and perform](#use-whas-ask-chat-and-perform)
 - [TTS commands](#tts-commands)
 - [Troubleshooting](#troubleshooting)
 - [Technical reference and historical tests](#technical-reference-and-historical-tests)
@@ -828,7 +828,7 @@ Get-Command whas -CommandType Application -ErrorAction SilentlyContinue
 
 Registration supplies the common command names; their presence does not mean
 every component is installed. Use commands for your selected components. For
-an actual response or speech test, continue with [Using the AI agents](#using-the-ai-agents) and
+an actual response or speech test, continue with [ask, chat and perform](#use-whas-ask-chat-and-perform) and
 [TTS commands](#tts-commands). Command discovery alone does not verify inference
 or audio playback.
 
@@ -948,7 +948,7 @@ restored a previous installation's registration, its commands may still be
 listed. Read the uninstall receipt for removed and retained files/models;
 personal data can leave the installation directory in place.
 
-## Using the AI agents
+## Use WHAS: ask, chat and perform
 
 The [complete command and flag reference](cli.md#complete-command-and-flag-reference)
 lists every WHAS request, speech and setup option. Run `whas --help` for
@@ -961,11 +961,12 @@ application. The unified interface is `whas`:
 | Operation | Saved route | This PC | Cloud |
 |---|---|---|---|
 | One-off question, no file/system tools | `whas ask` | `whas askl` | `whas askc` |
-| Task with file/system tools | `whas perform` | `whas performl` | `whas performc` |
 | Contextual CLI conversation | `whas chat` | `whas chatl` | `whas chatc` |
+| Task with file/system tools | `whas perform` | `whas performl` | `whas performc` |
 
-Choose the working folder before running a task. For example, from a folder
-where you want a notes file:
+`ask` answers without file tools; `chat` keeps conversation context; `perform`
+can use files and system tools. Choose the working folder before running a
+task. For example, from a folder where you want a notes file:
 
 ```powershell
 whas askc "Explain the difference between RAM and storage"

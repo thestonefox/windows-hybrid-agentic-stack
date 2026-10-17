@@ -28,6 +28,7 @@ try {
     Write-Fixture 'LICENSE' 'Fixture licence'
     Write-Fixture 'docs/installation.md' '# Public installation guide'
     Write-Fixture 'docs/images/gui-assistant.png' 'Fixture screenshot'
+    Write-Fixture 'docs/images/cli-terminal.svg' '<svg xmlns="http://www.w3.org/2000/svg"/>'
     Write-Fixture 'docs/private.md' 'DO_NOT_SHIP'
     Write-Fixture '.gitignore' 'docs/private.md'
     $manifest=Get-Content -LiteralPath (Join-Path $repo 'tts/strategies/chatterbox-turbo/manifest.json') -Raw | ConvertFrom-Json
@@ -46,7 +47,7 @@ try {
     try {
         $entries=@($archive.Entries.FullName)
         if (@($entries | Where-Object { $_.Contains('\') }).Count) { throw 'ZIP entries must use portable forward slashes' }
-        if ($entries -contains 'docs/private.md' -or $entries -notcontains 'docs/installation.md' -or $entries -notcontains 'docs/images/gui-assistant.png' -or $entries -notcontains 'build.json') { throw 'Release asset allowlist failed' }
+        if ($entries -contains 'docs/private.md' -or $entries -notcontains 'docs/installation.md' -or $entries -notcontains 'docs/images/gui-assistant.png' -or $entries -notcontains 'docs/images/cli-terminal.svg' -or $entries -notcontains 'build.json') { throw 'Release asset allowlist failed' }
         if ($entries -notcontains 'whas-gui.exe' -or $entries -contains 'whas-setup.exe') { throw 'Release must contain the single graphical entry point' }
     }
     finally { $archive.Dispose() }

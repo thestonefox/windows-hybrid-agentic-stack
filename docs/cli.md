@@ -4,6 +4,35 @@ Install from [Quickstart](quickstart.md) first. Commands require the active
 installation's registration directory on PATH. No profile or saved execution
 policy change is needed for installed native launchers.
 
+## Start here: ask, chat or perform
+
+These are the three everyday commands. They use your saved This PC or Cloud
+default unless you choose a route for that request.
+
+| Command | Use it for | Example |
+|---|---|---|
+| `whas ask "QUESTION"` | One-off answer without file or system tools | `whas ask "What is 2 + 2?"` |
+| `whas chat` | Interactive conversation that remembers the session | `whas chat --no-voice` |
+| `whas perform "TASK"` | Independent task that can read or change files and use system tools | `whas perform "Create notes.txt here"` |
+
+Run a task from the folder you want it to use. `whas perform` uses the current
+PowerShell folder; `ask` and `chat` do not have file tools. CLI chat uses
+OpenCode sessions, including for local models. It cannot speak replies, so
+`--no-voice` is needed if speech is enabled in your saved defaults.
+
+For a spoken answer, install a speech engine and add `--voice` to an ask or
+perform request. To speak text without asking an AI model, use `whas tts say`:
+
+```powershell
+whas ask --voice "Explain gravity in one sentence"
+whas tts say "Hello from WHAS"
+```
+
+Append `l` for This PC (`whas askl`, `whas chatl`, `whas performl`) or `c`
+for Cloud (`whas askc`, `whas chatc`, `whas performc`). These are shortcuts
+for `--local` and `--cloud`. See [request details](#questions-tasks-and-conversations)
+for models, sessions and tool permissions.
+
 ## Complete command and flag reference
 
 Installed help:

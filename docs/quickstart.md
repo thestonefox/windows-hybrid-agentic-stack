@@ -153,14 +153,28 @@ configured, the same application opens usage and settings. See the
 ## 5. Try your installed components
 
 Run the [PATH refresh command](#refresh-path) again or reopen the terminal
-application. Use the examples for components you installed:
+application. Use the commands for components you installed:
+
+| Command | What it does |
+|---|---|
+| `whas ask "QUESTION"` | Answers one question without file tools |
+| `whas chat` | Opens a conversation that keeps context |
+| `whas perform "TASK"` | Runs a task with file and system tools in your current folder |
+
+These use your saved This PC or Cloud default. Append `l` or `c` to pick a
+route for one request, as in `whas askl` or `whas askc`. For a task, first
+move to the folder whose files you want to use.
 
 ```powershell
-whas askc "Explain the difference between RAM and storage"
+whas ask "Explain the difference between RAM and storage"
 ```
 
 ```powershell
-whas askl "What is 2 plus 2?"
+whas chat --no-voice
+```
+
+```powershell
+whas perform "Create notes.txt here"
 ```
 
 ```powershell
@@ -168,15 +182,16 @@ whas tts say "Hello, the speech service is working."
 ```
 
 ```powershell
-whas askc --voice "Explain gravity in one sentence"
+whas ask --voice "Explain gravity in one sentence"
 ```
 
+CLI chat cannot speak replies. Use `--no-voice` when speech is enabled in
+your saved defaults; `--voice` speaks answers from `ask` and `perform`.
 The first speech request loads a model. See [engine management](tts-strategies.md#manage-installed-engines)
 and the [per-engine guides](tts-strategies.md#user-guides) for selection and custom voices.
-Use `whas configure` to change defaults. For contextual conversations use
-`whas chatl` or `whas chatc`; [session guidance](agent-strategies.md#sessions-and-memory)
-explains resumption and personal data. CLI chat uses OpenCode; GUI chat on
-This PC uses Ollama directly with history kept in the current window.
+Use `whas configure` to change defaults. [Session guidance](agent-strategies.md#sessions-and-memory)
+explains resumption and personal data. CLI chat uses OpenCode; GUI chat on This
+PC uses Ollama directly with history kept in the current window.
 Open the repository or installed `whas-gui.exe` for graphical use, then use
 the top-right cog for **Configuration**. Choose **Maintenance > Removal**
 for whole-app uninstallation. Opening a newer repository EXE uses the existing

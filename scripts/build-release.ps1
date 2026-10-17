@@ -34,7 +34,7 @@ $bundle = Join-Path $OutputPath 'bundle'
 & (Join-Path $PSScriptRoot 'build-gui.ps1') -OutputPath (Join-Path $bundle 'whas-gui.exe')
 foreach ($file in @('README.md','LICENSE')) { Copy-Item -LiteralPath (Join-Path $repo $file) -Destination (Join-Path $bundle $file) }
 [IO.Directory]::CreateDirectory((Join-Path $bundle 'docs')) | Out-Null
-foreach ($file in @($tracked | Where-Object { $_ -like 'docs/*.md' -or $_ -like 'docs/images/*.png' })) {
+foreach ($file in @($tracked | Where-Object { $_ -like 'docs/*.md' -or $_ -like 'docs/images/*.png' -or $_ -like 'docs/images/*.svg' })) {
     $relative = $file.Substring(5)
     $destination = Join-Path (Join-Path $bundle 'docs') $relative
     [IO.Directory]::CreateDirectory((Split-Path -Parent $destination)) | Out-Null

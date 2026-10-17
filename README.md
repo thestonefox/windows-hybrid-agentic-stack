@@ -21,11 +21,13 @@ warning. See [EXE setup and verification](docs/installation.md#standalone-execut
 
 ## Two ways to use WHAS
 
-After setup, use PowerShell commands or open `whas-gui.exe`:
+After setup, use PowerShell commands or open `whas-gui.exe`. The terminal
+preview uses a generic `C:\work` folder; choose your own folder before running
+a task that reads or writes files.
 
 | PowerShell | Graphical app |
 |---|---|
-| <code>whas ask "What is 2 + 2?"</code><br><code>whas chat</code><br><code>whas --help</code><br><br>[Command reference](docs/cli.md#complete-command-and-flag-reference) | <a href="docs/images/gui-conversation.png"><img src="docs/images/gui-conversation.png" alt="WHAS Assistant showing a sample conversation" width="500"></a><br>[GUI guide](docs/gui.md) |
+| <a href="docs/images/cli-terminal.svg"><img src="docs/images/cli-terminal.svg" alt="Illustrative PowerShell terminal showing whas ask, chat, perform, ask with voice, and tts say" width="500"></a><br>[CLI guide and all flags](docs/cli.md) | <a href="docs/images/gui-conversation.png"><img src="docs/images/gui-conversation.png" alt="WHAS Assistant showing a sample conversation" width="500"></a><br>[GUI guide](docs/gui.md) |
 
 ## Commands
 
@@ -45,8 +47,8 @@ command layer; use [shared app repair](docs/gui.md#use-and-configure) after upda
 | Command | Purpose |
 |---|---|
 | `whas ask`, `whas askl`, `whas askc` | One-off questions without file or system tools |
-| `whas perform`, `whas performl`, `whas performc` | Independent tasks with file and system tools |
 | `whas chat`, `whas chatl`, `whas chatc` | Contextual conversations |
+| `whas perform`, `whas performl`, `whas performc` | Independent tasks with file and system tools |
 | `whas configure` | Shared CLI and GUI settings |
 | `whas tts say` | Generate and play speech locally |
 
