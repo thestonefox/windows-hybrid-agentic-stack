@@ -178,6 +178,17 @@
       "properties": {
         "transcriptRequired": {
           "type": "boolean"
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 80,
+            "pattern": "^\\{name\\}[A-Za-z0-9_.-]*\\.(wav|pt|txt)$"
+          }
         }
       }
     }

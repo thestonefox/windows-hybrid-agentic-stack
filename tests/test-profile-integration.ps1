@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
 # Runs real executable registration, root installer orchestration and
 # command wrappers against a disposable copy. Dependency installation,
@@ -36,10 +36,10 @@ function Assert-Runtime {
     Assert-True (@($ownership.Files.Path) -contains 'uninstall.ps1') 'Installed uninstaller is tracked'
     $commands = @(Get-Command agent,agentdo,localagent,localagentdo,
         tts-start,tts-stop,tts-status,tts-say,tts-voice-list,
-        tts-voice-add,tts-voice-remove,tts-voice-test,tts-engine-list,tts-engine-install,tts-engine-uninstall,tts-engine-default,whas -CommandType Application)
-    Assert-True (@($commands | Select-Object -ExpandProperty Name -Unique).Count -eq 17) 'Native command entry points registered'
+        tts-voice-add,tts-voice-remove,tts-voice-test,tts-engine-list,tts-engine-install,tts-engine-uninstall,tts-engine-default,whas,tts-help -CommandType Application)
+    Assert-True (@($commands | Select-Object -ExpandProperty Name -Unique).Count -eq 18) 'Native command entry points registered'
     Assert-True ([IO.File]::ReadAllText((Join-Path $bin 'install-root.txt')) -ceq $ExpectedRoot) 'Selected root registered locally'
-    if ($Count -eq 17) {
+    if ($Count -eq 18) {
         & (Join-Path $bin 'agent.exe') --help
         Assert-True ($LASTEXITCODE -eq 0) 'Real agent help works'
     }
@@ -53,7 +53,7 @@ try {
     $fixtureRepo = Join-Path $testRoot 'repository'
     foreach ($relative in @('install.ps1', 'uninstall.ps1', 'config\AGENTS.md', 'scripts\setup-preview.ps1', 'scripts\script-invocation.ps1', 'scripts\installation-state.ps1', 'scripts\uninstall.ps1', 'scripts\install-agent-commands.ps1',
         'scripts\command-registration.ps1', 'scripts\command-host.cs', 'scripts\configuration.ps1', 'scripts\profile-loader.ps1', 'scripts\config.ps1', 'scripts\agent-commands.ps1',
-        'scripts\gui-host.cs','scripts\build-gui.ps1','scripts\build-setup.ps1','scripts\setup-host.cs','scripts\setup-runtime.cs','scripts\agent-strategies.ps1','scripts\whas.ps1','agents\strategies\opencode\manifest.json','agents\strategies\opencode\adapter.ps1','config\defaults.json', 'tts\tts.ps1', 'tts\tts_service.py', 'tts\strategy-management.ps1', 'tts\engine-management.ps1', 'tts\strategy.schema.json', 'tts\strategies\chatterbox-turbo\manifest.json', 'tts\strategies\chatterbox-turbo\install.ps1', 'tts\strategies\chatterbox-turbo\uninstall.ps1', 'tts\strategies\chatterbox-turbo\backend.py', 'tts\strategies\chatterbox-turbo\requirements.txt', 'tts\strategies\chatterbox-turbo\prepare_model.py')) {
+        'scripts\gui-host.cs','scripts\gui-maintenance.ps1','scripts\fluent-gui.cs','scripts\gui-theme.xaml','scripts\build-gui.ps1','scripts\build-setup.ps1','scripts\setup-host.cs','scripts\setup-runtime.cs','scripts\agent-strategies.ps1','scripts\whas.ps1','agents\strategies\opencode\manifest.json','agents\strategies\opencode\adapter.ps1','config\defaults.json', 'tts\tts.ps1', 'tts\tts_service.py', 'tts\strategy-management.ps1', 'tts\engine-management.ps1', 'tts\strategy.schema.json', 'tts\strategies\chatterbox-turbo\manifest.json', 'tts\strategies\chatterbox-turbo\install.ps1', 'tts\strategies\chatterbox-turbo\uninstall.ps1', 'tts\strategies\chatterbox-turbo\backend.py', 'tts\strategies\chatterbox-turbo\requirements.txt', 'tts\strategies\chatterbox-turbo\prepare_model.py')) {
         $destination = Join-Path $fixtureRepo $relative
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $sourceRoot $relative) -Destination $destination
@@ -86,6 +86,7 @@ exit 0
 param([string]$InstallPath, [string]$Device, [string]$TtsEngine)
 $destination = Join-Path $InstallPath 'tts'
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
+[IO.File]::WriteAllText((Join-Path $destination 'device-choice.txt'),$Device)
 foreach ($name in @('tts.ps1', 'tts_service.py')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $destination $name) -Force
 }
@@ -109,17 +110,20 @@ exit 0
     function Set-ExecutionPolicy { throw 'Tests must not change execution policy.' }
     function Start-Process { throw 'Tests must not start a service.' }
 
+    Write-Fixture (Join-Path $fixtureRepo 'config/config.json') '{"tts":{"device":"cpu","deviceDefaults":{"chatterbox-turbo":"cuda"}}}'
     & $entryPoint -PersistCommandPath $false -Voice -InstallPath $rootA
+    Assert-True ([IO.File]::ReadAllText((Join-Path $rootA 'tts/device-choice.txt')) -eq 'cuda') 'Root installer forwards engine-specific device instead of global fallback'
     Assert-True ($LASTEXITCODE -eq 0) 'Root installer voice-only succeeds'
+    Assert-True ([IO.File]::ReadAllText((Join-Path $rootA 'tts/device-choice.txt')) -eq 'cuda') 'Root installer forwards engine-specific device instead of global fallback'
     Assert-Runtime $rootA 8
     Write-Host 'PASS: Voice-only installer registers real TTS commands at a custom root'
 
 
     & $entryPoint -PersistCommandPath $false -Cloud -InstallPath $rootA
     Assert-True ($LASTEXITCODE -eq 0) 'Adding agents succeeds after voice-only'
-    Assert-Runtime $rootA 17
+    Assert-Runtime $rootA 18
     Assert-True (-not (Test-Path -LiteralPath $profilePath)) 'Adding agents creates no profile'
-    Write-Host 'PASS: Agent installer reuses the same registration; all 17 real commands load'
+    Write-Host 'PASS: Agent installer reuses the same registration; all 18 real commands load'
 
 
     $localFile = Join-Path $machineA '.windows-hybrid-agentic-stack\commands.json'
@@ -128,18 +132,18 @@ exit 0
     Assert-True ($LASTEXITCODE -eq 0) 'Repeat combined installation succeeds'
     Assert-True (-not (Test-Path -LiteralPath $profilePath)) 'Repeat profile bytes unchanged'
     Assert-True ((Get-FileHash -LiteralPath $localFile).Hash -ceq $localHash) 'Repeat local loader bytes unchanged'
-    Assert-Runtime $rootA 17
+    Assert-Runtime $rootA 18
     Write-Host 'PASS: Repeat combined installer leaves registration unchanged'
 
     $env:LOCALAPPDATA = $machineB
     $env:USERPROFILE = $machineB
     & $entryPoint -PersistCommandPath $false -Cloud -Voice -InstallPath $rootB
     Assert-True ($LASTEXITCODE -eq 0) 'Second simulated machine installer succeeds'
-    Assert-Runtime $rootB 17
+    Assert-Runtime $rootB 18
     Assert-True (-not (Test-Path -LiteralPath $profilePath)) 'Second machine preserves synced profile'
     $env:LOCALAPPDATA = $machineA
     $env:USERPROFILE = $machineA
-    Assert-Runtime $rootA 17
+    Assert-Runtime $rootA 18
     Write-Host 'PASS: Separate local registrations select each simulated PC root without a profile'
 
     # Exercise lazy voice loading without starting Python or producing audio.
@@ -178,7 +182,7 @@ exit 0
     $env:USERPROFILE = $machineA
     & $entryPoint -PersistCommandPath $false -Cloud -Voice -InstallPath $rootB
     Assert-True ($LASTEXITCODE -eq 0) 'Changing selected root succeeds'
-    Assert-Runtime $rootB 17
+    Assert-Runtime $rootB 18
     Write-Host 'PASS: Installer updates machine-local registration when selected root changes'
 
     $parseErrors = @()

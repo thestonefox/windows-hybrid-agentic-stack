@@ -22,13 +22,18 @@ namespace WindowsHybridAgenticStack {
                 }
                 System.Windows.Forms.Application.EnableVisualStyles();
                 System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
-                try { using(var window=new WhasWindow(!WhasWindow.IsConfigured(root),executable,SetupPayload.StrategyCatalog,root)) {
-                    if(render) window.Render(args[1]); else System.Windows.Forms.Application.Run(window);
-                } } finally { if(!render) GuiMaintenance.CleanupAfterExit(executable); }
+                try { ShowWindow(!WhasWindow.IsConfigured(root),executable,root,render?args[1]:null); }
+                finally { if(!render) GuiMaintenance.CleanupAfterExit(executable); }
                 return 0;
             } catch(Exception error) {
                 System.Windows.Forms.MessageBox.Show(error.Message,"WHAS",System.Windows.Forms.MessageBoxButtons.OK,System.Windows.Forms.MessageBoxIcon.Error);
                 return 1;
+            }
+        }
+        internal static void ShowWindow(bool setup,string executable,string root,string render) {
+            using(var window=new FluentWindow(setup,executable,SetupPayload.StrategyCatalog,root,SetupPayload.ReadText("scripts/gui-theme.xaml"))) {
+                if(render!=null) window.Render(render);
+                else {var app=new System.Windows.Application();app.ShutdownMode=System.Windows.ShutdownMode.OnMainWindowClose;app.Run(window);}
             }
         }
     }
@@ -41,6 +46,8 @@ namespace WindowsHybridAgenticStack {
             Console.WriteLine("  --plan                 Preview selected components and destination");
             Console.WriteLine("  --check                Check selected prerequisites without installing");
             Console.WriteLine("  --cloud --local --voice Select components (default: bundled configuration)");
+            Console.WriteLine("  --tts-devices MAP      Per-engine choices: ID=cuda,ID=cpu (--voice)");
+            Console.WriteLine("  --tts-device ID        Speech device: auto, cpu or cuda (--voice)");
             Console.WriteLine("  --tts-engine IDS       Comma-separated TTS engines; first is default (--voice)");
             Console.WriteLine("  --local-models IDS     Comma-separated Ollama models to install (--local)");
             Console.WriteLine("  --default-local-model ID Choose the default from selected local models");
@@ -64,7 +71,13 @@ namespace WindowsHybridAgenticStack {
 
         [STAThread]
         public static int Main(string[] args) {
-            if(Environment.GetEnvironmentVariable("WHAS_PROGRESS_EVENTS")=="1") Console.OutputEncoding=new System.Text.UTF8Encoding(false);
+            // WinExe children have redirected pipes but no console handle.
+            // OutputEncoding calls SetConsoleOutputCP and fails without one.
+            if(Environment.GetEnvironmentVariable("WHAS_PROGRESS_EVENTS")=="1") {
+                var utf8=new System.Text.UTF8Encoding(false);
+                Console.SetOut(new System.IO.StreamWriter(Console.OpenStandardOutput(),utf8){AutoFlush=true});
+                Console.SetError(new System.IO.StreamWriter(Console.OpenStandardError(),utf8){AutoFlush=true});
+            }
             if (args.Length == 0 || (args.Length == 1 && args[0] == "--gui") || (args.Length == 3 && args[0] == "--gui" && args[1] == "--install-path") || (args.Length == 2 && args[0] == "--gui-render")) {
                 System.Windows.Forms.Application.EnableVisualStyles();
                 System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
@@ -77,10 +90,8 @@ namespace WindowsHybridAgenticStack {
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(copy,"--gui --install-path "+GuiProcess.Quote(initialRoot)){UseShellExecute=false,CreateNoWindow=true});
                     return 0;
                 }
-                try { using (var window = new WhasWindow(true, executable, SetupPayload.StrategyCatalog,args.Length==3?args[2]:null)) {
-                    if (args.Length == 2) window.Render(args[1]);
-                    else System.Windows.Forms.Application.Run(window);
-                } } finally { if(!render) GuiMaintenance.CleanupAfterExit(executable); }
+                try { GuiBootstrap.ShowWindow(true,executable,args.Length==3?args[2]:WhasWindow.ResolveRoot(executable),render?args[1]:null); }
+                finally { if(!render) GuiMaintenance.CleanupAfterExit(executable); }
                 return 0;
             }
             try { return Run(args); }
@@ -105,7 +116,8 @@ namespace WindowsHybridAgenticStack {
         }
 
         private static int Run(string[] args) {
-            string mode = null, config = null, path = null, ttsEngine = null, localModels = null, defaultLocalModel = null, defaultLocation = null;
+            string mode = null, config = null, path = null, ttsEngine = null, localModels = null, defaultLocalModel = null, defaultLocation = null, ttsDevice = null, ttsDevices = null;
+            string maintenance=null,feature=null,voiceName=null,speechText=null,referencePath=null,idleTimeoutMinutes=null;
             bool cloud = false, local = false, voice = false, core = false;
             bool yes = false, apply = false, noPath = false, removeModels = false, retainModels = false;
             foreach (string value in args) if (value == null) throw new ArgumentException("Invalid argument.");
@@ -114,13 +126,21 @@ namespace WindowsHybridAgenticStack {
                 if (option == "--help" || option == "-h" || option == "--plan" || option == "--check" || option == "--install" || option == "--uninstall") {
                     if (mode != null) throw new ArgumentException("Choose one setup action.");
                     mode = option == "-h" ? "--help" : option;
-                } else if (option == "--cloud") cloud = true;
+                } else if (option == "--maintain") {if(mode!=null) throw new ArgumentException("Choose one action.");mode="--maintain";maintenance=Next(args,ref i);}
+                else if(option=="--feature") feature=Next(args,ref i);
+                else if(option=="--voice-name") voiceName=Next(args,ref i);
+                else if(option=="--speech-text") speechText=Next(args,ref i);
+                else if(option=="--reference-path") referencePath=Next(args,ref i);
+                else if(option=="--idle-timeout-minutes") idleTimeoutMinutes=Next(args,ref i);
+                else if (option == "--cloud") cloud = true;
                 else if (option == "--core") core = true;
                 else if (option == "--local") local = true;
                 else if (option == "--voice") voice = true;
                 else if (option == "--local-models") { if (localModels != null) throw new ArgumentException("Duplicate local models."); localModels = Next(args, ref i); }
                 else if (option == "--default-location") { if(defaultLocation != null) throw new ArgumentException("Duplicate default location."); defaultLocation=Next(args,ref i); }
                 else if (option == "--default-local-model") { if (defaultLocalModel != null) throw new ArgumentException("Duplicate default model."); defaultLocalModel = Next(args, ref i); }
+                else if (option == "--tts-devices") {if(ttsDevices!=null) throw new ArgumentException("Duplicate engine devices.");ttsDevices=Next(args,ref i);}
+                else if (option == "--tts-device") { if(ttsDevice!=null) throw new ArgumentException("Duplicate speech device.");ttsDevice=Next(args,ref i); }
                 else if (option == "--tts-engine") {
                     if (ttsEngine != null) throw new ArgumentException("Duplicate --tts-engine option.");
                     ttsEngine = Next(args, ref i);
@@ -140,6 +160,14 @@ namespace WindowsHybridAgenticStack {
             }
             if (mode == "--help" || args.Length == 0) { Help(); return 0; }
             if (mode == null) throw new ArgumentException("Specify a setup action; use --help for usage.");
+            if(mode=="--maintain") {
+                if(path==null || core || cloud || local || voice || yes || apply || config!=null || noPath || removeModels || retainModels || localModels!=null || defaultLocalModel!=null || defaultLocation!=null) throw new ArgumentException("Maintenance requires an installation path and only its own options.");
+                var options=new Hashtable {{"InstallPath",path},{"Action",maintenance},{"Engine",ttsEngine},{"VoiceName",voiceName},{"Text",speechText},{"ReferencePath",referencePath}};
+                if(feature!=null) options.Add("Feature",feature);
+                if(idleTimeoutMinutes!=null) {if(maintenance!="speech-timeout") throw new ArgumentException("Idle timeout requires speech-timeout maintenance.");options.Add("IdleTimeoutMinutes",idleTimeoutMinutes);}
+                return SetupRuntime.Run("scripts/gui-maintenance.ps1",options,null);
+            }
+            if(feature!=null || voiceName!=null || speechText!=null || referencePath!=null || idleTimeoutMinutes!=null) throw new ArgumentException("Maintenance options require --maintain.");
             if (apply && mode != "--uninstall") throw new ArgumentException("--apply requires --uninstall.");
             if (removeModels && mode != "--uninstall") throw new ArgumentException("--remove-managed-models requires --uninstall.");
             if (retainModels && mode != "--uninstall") throw new ArgumentException("--retain-managed-models requires --uninstall.");
@@ -151,7 +179,7 @@ namespace WindowsHybridAgenticStack {
             if (mode == "--uninstall") {
                 string adjacent=System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
                 if(System.IO.File.Exists(System.IO.Path.Combine(adjacent,".whas-installation.json")) && (path==null || String.Equals(System.IO.Path.GetFullPath(path).TrimEnd('\\'),adjacent.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Open the installed setup without arguments for graphical removal, or run a copy outside the installation directory for console uninstall.");
-                if (core || cloud || local || voice || config != null || ttsEngine != null || defaultLocation != null) throw new ArgumentException("Uninstall does not accept component or configuration flags.");
+                if (core || cloud || local || voice || config != null || ttsEngine != null || ttsDevice != null || ttsDevices != null || defaultLocation != null) throw new ArgumentException("Uninstall does not accept component or configuration flags.");
                 Hashtable arguments = new Hashtable { { "Apply", apply }, { "PersistCommandPath", !noPath }, { "RetainManagedModels", retainModels }, { "RemoveManagedModels", removeModels } };
                 if (path != null) arguments.Add("InstallPath", path);
                 if (yes) arguments.Add("Confirm", false);
@@ -178,7 +206,7 @@ namespace WindowsHybridAgenticStack {
                         .AddParameter("DefaultsJson", SetupPayload.Defaults)
                         .AddParameter("StrategyCatalogJson", SetupPayload.StrategyCatalog).AddParameter("TtsEngine", ttsEngine)
                         .AddParameter("LocalModels", localModels).AddParameter("DefaultLocalModel", defaultLocalModel)
-                        .AddParameter("DefaultLocation",defaultLocation)
+                        .AddParameter("DefaultLocation",defaultLocation).AddParameter("TtsDevice",ttsDevice).AddParameter("TtsDevices",ttsDevices)
                         .AddParameter("Interactive", mode == "--install" && !yes)
                         .AddParameter("ConfigPath", config).AddParameter("InstallPath", path)
                         .AddParameter("Cloud", cloud).AddParameter("Local", local).AddParameter("Voice", voice)
@@ -211,8 +239,10 @@ namespace WindowsHybridAgenticStack {
                         .AddParameter("StrategyManifestJson", manifests[check])
                         .AddCommand("Out-Default");
                         ps.Invoke();
-                        if (host.ExitRequested && host.ExitCode != 0) return host.ExitCode;
-                        if (ps.HadErrors) return 1;
+                        // Probes can suppress/catch an error and still exit 0.
+                        // Honour the checker's explicit result before HadErrors.
+                        if (host.ExitRequested) { if (host.ExitCode != 0) return host.ExitCode; }
+                        else if (ps.HadErrors) return 1;
                     }
                     return 0;
                 }

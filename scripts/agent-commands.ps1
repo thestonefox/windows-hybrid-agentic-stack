@@ -86,6 +86,88 @@ function ConvertTo-AgentAnswer {
     return $answer.TrimEnd()
 }
 
+function Add-AgentLocalModelConfiguration {
+    param([string]$Model)
+    if (-not $Model.StartsWith('ollama/',[StringComparison]::Ordinal)) { return $env:OPENCODE_CONFIG_CONTENT }
+    $inline=if([string]::IsNullOrWhiteSpace($env:OPENCODE_CONFIG_CONTENT)){[pscustomobject]@{}}else{$env:OPENCODE_CONFIG_CONTENT|ConvertFrom-Json -ErrorAction Stop}
+    if($inline -isnot [pscustomobject]) { throw 'The inherited OpenCode inline configuration must be an object.' }
+    $parent=$inline
+    foreach($key in @('provider','ollama','models')) {
+        if($null -eq $parent.PSObject.Properties[$key]) {$parent|Add-Member -NotePropertyName $key -NotePropertyValue ([pscustomobject]@{})}
+        $parent=$parent.$key
+        if($parent -isnot [pscustomobject]) { throw "The inherited OpenCode $key configuration must be an object." }
+    }
+    $name=$Model.Substring(7)
+    if($null -eq $parent.PSObject.Properties[$name]) {$parent|Add-Member -NotePropertyName $name -NotePropertyValue ([pscustomobject]@{name=$name})}
+    return $inline|ConvertTo-Json -Depth 40 -Compress
+}
+
+function Add-AgentConversationConfiguration {
+    $inline=if([string]::IsNullOrWhiteSpace($env:OPENCODE_CONFIG_CONTENT)){[pscustomobject]@{}}else{$env:OPENCODE_CONFIG_CONTENT|ConvertFrom-Json -ErrorAction Stop}
+    if($inline -isnot [pscustomobject]) {throw 'The inherited OpenCode inline configuration must be an object.'}
+    if($null -eq $inline.PSObject.Properties['agent']) {$inline|Add-Member -NotePropertyName agent -NotePropertyValue ([pscustomobject]@{})}
+    if($inline.agent -isnot [pscustomobject]) {throw 'The inherited OpenCode agent configuration must be an object.'}
+    $permissions=[ordered]@{'*'='deny'}
+    foreach($name in @('read','edit','glob','grep','list','bash','task','webfetch','websearch','lsp','skill','question','external_directory')) {$permissions[$name]='deny'}
+    $profile=[pscustomobject]@{description='Plain conversational assistant';mode='primary';prompt="You are a helpful conversational assistant. Answer the user's message directly using the conversation so far. Do not assume the message is a file or coding task. You have no tools and cannot inspect files or execute commands. For file or live system tasks, use Run a task (whas perform).";permission=[pscustomobject]$permissions}
+    $inline.agent|Add-Member -NotePropertyName 'whas-chat' -NotePropertyValue $profile -Force
+    return $inline|ConvertTo-Json -Depth 40 -Compress
+}
+
+function ConvertTo-AgentNativeArgument {
+    param([AllowEmptyString()][string]$Value)
+    if ($Value.IndexOf([char]0) -ge 0) { throw 'A command argument contains a null character.' }
+    # Encode each argument for CommandLineToArgvW directly. Windows PowerShell
+    # 5.1's native binder otherwise drops embedded quotes and splits paths.
+    $text=New-Object Text.StringBuilder
+    $null=$text.Append('"');$slashes=0
+    foreach($character in $Value.ToCharArray()) {
+        if($character -eq [char]92) {$slashes++;continue}
+        $count=if($character -eq [char]34){2*$slashes+1}else{$slashes}
+        $null=$text.Append([char]92,[int]$count).Append($character);$slashes=0
+    }
+    $text.Append([char]92,[int](2*$slashes)).Append('"').ToString()
+}
+
+function Invoke-AgentOpenCode {
+    param([string[]]$Arguments)
+    $command=Get-Command opencode -ErrorAction Stop
+    if($command.CommandType -in @('Function','Filter')) {
+        # Preserve in-process test doubles and explicitly supplied functions.
+        & opencode @Arguments
+        return
+    }
+    if($command.CommandType -ne 'Application' -or [IO.Path]::GetExtension($command.Source) -ine '.exe') {
+        throw 'OpenCode must resolve to its native opencode.exe. Install the native Windows CLI and refresh PATH.'
+    }
+    $start=New-Object Diagnostics.ProcessStartInfo
+    $start.FileName=$command.Source
+    $start.WorkingDirectory=$ExecutionContext.SessionState.Path.CurrentFileSystemLocation.Path
+    $start.Arguments=(@($Arguments|ForEach-Object {ConvertTo-AgentNativeArgument $_}) -join ' ')
+    $start.UseShellExecute=$false;$start.CreateNoWindow=$true
+    $start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true;$start.RedirectStandardInput=$true
+    $start.StandardOutputEncoding=New-Object Text.UTF8Encoding($false)
+    $start.StandardErrorEncoding=New-Object Text.UTF8Encoding($false)
+    $process=New-Object Diagnostics.Process
+    $process.StartInfo=$start
+    $started=$false
+    try {
+        if(-not $process.Start()) {throw 'OpenCode could not start.'}
+        $started=$true
+        $process.StandardInput.Close()
+        # Drain stderr concurrently so a full diagnostic pipe cannot block
+        # stdout. Emit it separately from answer events after the process ends.
+        $errors=$process.StandardError.ReadToEndAsync()
+        while($null -ne ($line=$process.StandardOutput.ReadLine())) {Write-Output $line}
+        $process.WaitForExit()
+        foreach($line in ($errors.Result -split '\r?\n')) {if($line.Length){Write-Output $line}}
+        $global:LASTEXITCODE=$process.ExitCode
+    } finally {
+        if($started -and -not $process.HasExited) {$process.Kill();$process.WaitForExit()}
+        $process.Dispose()
+    }
+}
+
 function Invoke-AgentStackTask {
     param(
         [Parameter(Mandatory = $true)]
@@ -98,13 +180,14 @@ function Invoke-AgentStackTask {
         [string]$Kind,
 
         [object[]]$Arguments = @(),
-        [switch]$StrictOutcome
+        [switch]$StrictOutcome,
+        [switch]$PlainQuestion
     )
 
     $isLocal = $Kind -in @('localagent', 'localagentdo')
     $canWrite = $Kind -in @('agentdo', 'localagentdo')
 
-    $agentName = if ($canWrite) {
+    $agentName = if($PlainQuestion) {'whas-chat'} elseif ($canWrite) {
         'ps-write'
     }
     else {
@@ -208,6 +291,8 @@ function Invoke-AgentStackTask {
         return
     }
 
+    $route=if($isLocal){'local'}else{'cloud'}
+    if(-not $config.agents.$route.enabled) { Write-Error "The $route feature has been removed. Add it in Configuration > Maintenance > Features before making requests."; return }
     if ($isLocal) {
         $provider = [string]$config.agents.local.provider
         $model = [string]$config.agents.local.model
@@ -305,6 +390,7 @@ function Invoke-AgentStackTask {
     $prompt = $promptParts -join ' '
 
     $previousConfig = $env:OPENCODE_CONFIG
+    $previousInlineConfig = $env:OPENCODE_CONFIG_CONTENT
 
     # Windows PowerShell 5.1 may otherwise decode UTF-8
     # native application output using the console code page.
@@ -317,6 +403,8 @@ function Invoke-AgentStackTask {
             $activity = [WindowsHybridAgenticStack.OperationActivity]::Begin('Waiting for model response')
         }
         $env:OPENCODE_CONFIG = $openCodeConfig
+        if($PlainQuestion) {$env:OPENCODE_CONFIG_CONTENT=Add-AgentConversationConfiguration}
+        if($isLocal) { $env:OPENCODE_CONFIG_CONTENT=Add-AgentLocalModelConfiguration $model }
 
         $utf8 = New-Object System.Text.UTF8Encoding($false)
 
@@ -326,10 +414,7 @@ function Invoke-AgentStackTask {
         # Preserve the existing full-output behaviour when
         # voice support is not requested.
         if ($verboseOutput -and -not $voiceEnabled) {
-            & opencode run `
-                --agent $agentName `
-                @modelArguments `
-                $prompt
+            Invoke-AgentOpenCode (@('run','--agent',$agentName)+$modelArguments+@($prompt))
 
             return
         }
@@ -339,11 +424,7 @@ function Invoke-AgentStackTask {
         $errorsFound = @()
         $exitCode = 0
 
-        & opencode run `
-            --agent $agentName `
-            @modelArguments `
-            --format json `
-            $prompt 2>&1 |
+        Invoke-AgentOpenCode (@('run','--agent',$agentName)+$modelArguments+@('--format','json',$prompt)) |
             ForEach-Object {
                 $line = [string]$_
 
@@ -431,6 +512,7 @@ function Invoke-AgentStackTask {
     finally {
         if ($activity) { $activity.Dispose() }
         $env:OPENCODE_CONFIG = $previousConfig
+        $env:OPENCODE_CONFIG_CONTENT = $previousInlineConfig
         [Console]::OutputEncoding = $previousConsoleEncoding
         $OutputEncoding = $previousOutputEncoding
     }

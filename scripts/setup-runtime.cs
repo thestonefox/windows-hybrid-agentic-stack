@@ -70,7 +70,7 @@ namespace WindowsHybridAgenticStack {
                     if (display) ps.AddCommand("Out-Default");
                     Collection<PSObject> output = ps.Invoke();
                     foreach (ErrorRecord error in ps.Streams.Error) Console.Error.WriteLine(error);
-                    return new SetupScriptResult { Output = output, ExitCode = host.ExitRequested ? host.ExitCode : (ps.HadErrors ? 1 : 0) };
+                    return new SetupScriptResult { Output = output, ExitCode = host.ExitRequested ? host.ExitCode : (ps.Streams.Error.Count != 0 ? 1 : 0) };
                 }
             }
         }

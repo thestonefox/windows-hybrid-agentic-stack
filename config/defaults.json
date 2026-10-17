@@ -25,6 +25,7 @@
     "engine": "chatterbox-turbo",
     "defaultVoice": "default",
     "voiceDefaults": {},
+    "deviceDefaults": {},
     "idleTimeoutMinutes": 10,
     "autoStart": true,
     "host": "127.0.0.1",

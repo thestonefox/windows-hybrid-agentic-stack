@@ -4,6 +4,8 @@ param(
     [string]$DefaultsJson,
     [string]$StrategyCatalogJson,
     [string]$TtsEngine,
+    [string]$TtsDevice,
+    [string]$TtsDevices,
     [string]$LocalModels,
     [string]$DefaultLocalModel,
     [string]$DefaultLocation,
@@ -52,6 +54,22 @@ $InstallPath = [Environment]::ExpandEnvironmentVariables($InstallPath)
 if ($InstallPath -match '^\$HOME(?=[\\/]|$)') { $InstallPath = $HOME + $InstallPath.Substring(5) }
 $InstallPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallPath)
 $config.installation.directory = $InstallPath
+if ($TtsDevice) {
+    if (-not $Voice) { throw '--tts-device requires --voice.' }
+    if ($TtsDevice -cnotin @('auto','cpu','cuda')) { throw 'Speech device must be auto, cpu or cuda.' }
+    $config.tts.device=$TtsDevice
+}
+if($TtsDevices) {
+    if(-not $Voice -or $TtsDevice) {throw '--tts-devices requires --voice and cannot be combined with --tts-device.'}
+    if(-not $config.tts.PSObject.Properties['deviceDefaults']) {$config.tts|Add-Member -NotePropertyName deviceDefaults -NotePropertyValue ([pscustomobject]@{})}
+    $seen=@{}
+    foreach($item in $TtsDevices.Split(',')) {
+        if($item -cnotmatch '^([a-z][a-z0-9-]{0,47})=(auto|cpu|cuda)$') {throw 'Engine devices must use ENGINE=auto|cpu|cuda entries.'}
+        $id=$Matches[1];$device=$Matches[2]
+        if($seen.ContainsKey($id)){throw 'Duplicate engine device choice.'};$seen[$id]=$true
+        $config.tts.deviceDefaults|Add-Member -NotePropertyName $id -NotePropertyValue $device -Force
+    }
+}
 if ($TtsEngine -and -not $Voice) { throw '--tts-engine requires --voice.' }
 if ($TtsEngine) { $engineIds = @($TtsEngine.Split(',') | ForEach-Object { $_.Trim() }); $config.tts.engine = $engineIds[0] } else { $engineIds = @($config.tts.engine) }
 $engineManifest = $null
@@ -66,13 +84,15 @@ if ($Voice) {
     foreach ($engineId in $engineIds) {
         $matches = @($catalog | Where-Object { $_.id -ceq $engineId })
         if ($matches.Count -ne 1) { throw "TTS strategy unavailable: $engineId" }
-        if ($config.tts.device -ne 'auto' -and $config.tts.device -notin $matches[0].devices) { throw 'Device unsupported by selected strategy.' }
+        $engineDevice=Get-TtsConfiguredDevice $config $engineId
+        if ($engineDevice -ne 'auto' -and $engineDevice -notin $matches[0].devices) { throw "Speech engine $engineId does not support device $engineDevice. Supported devices: $($matches[0].devices -join ', '). Choose auto to select a supported device for each engine." }
         $allManifests += $matches[0]
     }
+    if($TtsDevices -and @($seen.Keys|Where-Object {$engineIds -cnotcontains $_}).Count){throw 'Device choice names an engine that is not selected.'}
     $selectedManifests = @($allManifests | Select-Object -First 1)
     if ($selectedManifests.Count -ne 1) { throw "TTS strategy unavailable: $($config.tts.engine)" }
     $engineManifest = $selectedManifests[0]
-    if ($config.tts.device -ne 'auto' -and $config.tts.device -notin $engineManifest.devices) { throw 'Device unsupported by selected strategy.' }
+
 }
 if ($ShowPlan) {
     Write-Host 'Installation preview'
@@ -90,8 +110,9 @@ if ($ShowPlan) {
     if ($Voice) {
         Write-Host "TTS engines:  $($engineIds -join ',')"
         Write-Host "Default TTS:  $($config.tts.engine)"
-        Write-Host "TTS device:   $($config.tts.device)"
+        Write-Host "TTS fallback device: $($config.tts.device)"
         foreach ($manifest in $allManifests) {
+            Write-Host ("TTS device for " + $manifest.id + ": " + (Get-TtsConfiguredDevice $config $manifest.id))
             Write-Host "TTS package:  $($manifest.name) $($manifest.version); licence: $($manifest.license)"
             foreach ($model in $manifest.models) {
                 $pin = if ($model.revision) { "revision $($model.revision)" } else { "SHA256 $($model.sha256)" }

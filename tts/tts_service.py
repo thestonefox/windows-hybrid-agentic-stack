@@ -54,7 +54,7 @@ def load_backend(root):
     for asset in records[0]['PackageFiles']:
         path = owned_path(root, asset['Path'])
         if hashlib.sha256(path.read_bytes()).hexdigest().upper() != asset['SHA256']:
-            raise ValueError('Installed strategy package changed')
+            raise ValueError(f'Installed strategy package changed: {asset["Path"]}')
     backend_path = owned_path(root, runtime['backendPath'])
     recorded = {asset['Path'] for asset in records[0]['PackageFiles']}
     if runtime['backendPath'] not in recorded:

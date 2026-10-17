@@ -124,8 +124,10 @@ function Get-StackUninstallPlan {
             $path = Get-StackRawUserPath
             $expectedPath = if ($state.OriginalUserPath.Value.Length -eq 0) { $bin } else { $state.OriginalUserPath.Value + ';' + $bin }
             $plan.RestoreUserPathExactly = $commands.PathEntryAdded -and $path.Value -ceq $expectedPath
+            $backupCommands = (@(Get-StackCommandNames | ForEach-Object { [regex]::Escape($_) }) -join '|')
+            $backupPattern = '^(?:(?:' + $backupCommands + ')\.exe|install-root\.txt)\.bak\.[a-f0-9]{32}$'
             foreach ($backup in $state.RegistrationBackups) {
-                if ($backup.Name -notmatch '^(agent|agentdo|localagent|localagentdo|tts-(start|stop|status|say|voice-(list|add|remove|test)|engine-(list|install|uninstall|default)))\.exe\.bak\.[a-f0-9]{32}$|^install-root\.txt\.bak\.[a-f0-9]{32}$') { throw 'Invalid registration backup name.' }
+                if ($backup.Name -cnotmatch $backupPattern) { throw 'Invalid registration backup name.' }
                 $file = Join-Path $bin $backup.Name
                 if ((Test-Path -LiteralPath $file) -and (Get-StackFileSHA256 $file) -ceq $backup.SHA256) { $plan.RegistrationBackups += $backup }
             }

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # Isolated tests: no persistent PATH/policy changes or real profile writes.
 [CmdletBinding()]
 param()
@@ -9,7 +9,7 @@ $originalPath = $env:Path
 $originalRecorder = $env:WHAS_TEST_ARGUMENTS
 $userPathBefore = [Environment]::GetEnvironmentVariable('Path', 'User')
 $policyBefore = Get-ExecutionPolicy -List | ConvertTo-Json -Compress
-$profileBefore = if (Test-Path -LiteralPath $PROFILE.CurrentUserCurrentHost) {
+$profileBefore = if ($PROFILE.CurrentUserCurrentHost -and (Test-Path -LiteralPath $PROFILE.CurrentUserCurrentHost)) {
     (Get-FileHash -LiteralPath $PROFILE.CurrentUserCurrentHost -Algorithm SHA256).Hash
 } else { 'ABSENT' }
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('whas-native-tests-' + [guid]::NewGuid().ToString('N'))
@@ -79,15 +79,15 @@ public static class FakeOpenCode {
     $env:WHAS_TEST_ARGUMENTS = Join-Path $testRoot 'received-arguments.txt'
     Install-StackCommandRegistration -InstallPath $rootA -RegistrationDirectory (Join-Path $localA 'WindowsHybridAgenticStack') -PersistPath $false
     $commands = @(Get-Command agent,agentdo,localagent,localagentdo,tts-start,tts-stop,tts-status,
-        tts-say,tts-voice-list,tts-voice-add,tts-voice-remove,tts-voice-test,tts-engine-list,tts-engine-install,tts-engine-uninstall,tts-engine-default,whas -CommandType Application)
-    Assert-True ($commands.Count -eq 17) 'All 17 executable names discovered'
+        tts-say,tts-voice-list,tts-voice-add,tts-voice-remove,tts-voice-test,tts-engine-list,tts-engine-install,tts-engine-uninstall,tts-engine-default,whas,tts-help -CommandType Application)
+    Assert-True ($commands.Count -eq 18) 'All 18 executable names discovered'
     $beforeFiles = @(Get-ChildItem -LiteralPath (Join-Path $localA 'WindowsHybridAgenticStack') -Recurse -File |
         Select-Object FullName,LastWriteTimeUtc,Length) | ConvertTo-Json -Compress
     Install-StackCommandRegistration -InstallPath $rootA -RegistrationDirectory (Join-Path $localA 'WindowsHybridAgenticStack') -PersistPath $false
     $afterFiles = @(Get-ChildItem -LiteralPath (Join-Path $localA 'WindowsHybridAgenticStack') -Recurse -File |
         Select-Object FullName,LastWriteTimeUtc,Length) | ConvertTo-Json -Compress
     Assert-True ($beforeFiles -ceq $afterFiles) 'Repeat registration leaves files/timestamps unchanged'
-    Write-Host 'PASS: All 17 native entry points; custom root and idempotence'
+    Write-Host 'PASS: All 18 native entry points; custom root and idempotence'
     $result = Invoke-Restricted @'
 $ErrorActionPreference='Stop'
 if ((Get-ExecutionPolicy) -ne 'Restricted') { throw 'Test policy not Restricted' }
@@ -168,7 +168,7 @@ finally {
     $env:WHAS_TEST_ARGUMENTS = $originalRecorder
     Assert-True ([Environment]::GetEnvironmentVariable('Path', 'User') -ceq $userPathBefore) 'Persistent user PATH unchanged'
     Assert-True ((Get-ExecutionPolicy -List | ConvertTo-Json -Compress) -ceq $policyBefore) 'Policy scopes unchanged'
-    $profileAfter = if (Test-Path -LiteralPath $PROFILE.CurrentUserCurrentHost) {
+    $profileAfter = if ($PROFILE.CurrentUserCurrentHost -and (Test-Path -LiteralPath $PROFILE.CurrentUserCurrentHost)) {
         (Get-FileHash -LiteralPath $PROFILE.CurrentUserCurrentHost -Algorithm SHA256).Hash
     } else { 'ABSENT' }
     Assert-True ($profileBefore -ceq $profileAfter) 'Real profile untouched'

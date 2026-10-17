@@ -2,10 +2,11 @@
 # Loaded by tts.ps1. Engine packages are trusted application code, not plugins
 # fetched from arbitrary URLs. Installed ownership hashes gate script execution.
 if (-not (Get-Command Get-StackSetupScript -ErrorAction Ignore)) {
-    . (Join-Path $script:TtsRoot 'scripts/script-invocation.ps1')
+    . (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts/script-invocation.ps1')
 }
-. (Get-StackSetupScript (Join-Path $script:TtsRoot 'scripts/installation-state.ps1'))
-. (Get-StackSetupScript (Join-Path $script:TtsRoot 'scripts/uninstall.ps1'))
+$managerSource=Split-Path -Parent $PSScriptRoot
+. (Get-StackSetupScript (Join-Path $managerSource 'scripts/installation-state.ps1'))
+. (Get-StackSetupScript (Join-Path $managerSource 'scripts/uninstall.ps1'))
 
 function Get-TtsEngineState {
     $state = Read-StackInstallationState $script:TtsRoot

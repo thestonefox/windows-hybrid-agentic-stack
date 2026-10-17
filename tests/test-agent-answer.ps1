@@ -21,7 +21,15 @@ Assert-Equal (ConvertTo-AgentAnswer "Paris`nSee /help for assistance." 'capital 
 Write-Host 'PASS: Answer footer boundaries, literal examples and normal text'
 
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('whas-agent-answer-' + [guid]::NewGuid().ToString('N'))
+$savedInline=$env:OPENCODE_CONFIG_CONTENT
 try {
+    $env:OPENCODE_CONFIG_CONTENT='{"model":"provider/cloud-default","provider":{"ollama":{"options":{"baseURL":"http://127.0.0.1:11434/v1"},"models":{"qwen3:8b":{"name":"My model","limit":{"context":16384}}}}},"agent":{"ps-read":{"permission":{"edit":"deny"}}}}'
+    $inheritedInline=$env:OPENCODE_CONFIG_CONTENT
+    $registered=Add-AgentLocalModelConfiguration 'ollama/qwen2.5:1.5b'|ConvertFrom-Json
+    if($registered.provider.ollama.models.'qwen2.5:1.5b'.name -cne 'qwen2.5:1.5b' -or $registered.provider.ollama.models.'qwen3:8b'.name -cne 'My model' -or $registered.provider.ollama.models.'qwen3:8b'.limit.context -ne 16384 -or $registered.model -cne 'provider/cloud-default' -or $registered.agent.'ps-read'.permission.edit -cne 'deny'){throw 'Local model registration replaced unrelated model, provider or permission settings'}
+    if($env:OPENCODE_CONFIG_CONTENT -cne $inheritedInline){throw 'Registration modified the parent environment'}
+    $plain=Add-AgentConversationConfiguration|ConvertFrom-Json
+    if($plain.agent.'whas-chat'.permission.'*' -cne 'deny' -or $plain.agent.'whas-chat'.permission.read -cne 'deny' -or $plain.agent.'whas-chat'.permission.bash -cne 'deny' -or $plain.agent.'ps-read'.permission.edit -cne 'deny' -or $plain.model -cne 'provider/cloud-default'){throw 'Plain chat did not deny tools while preserving unrelated inherited settings'}
     [IO.Directory]::CreateDirectory((Join-Path $fixture 'config')) | Out-Null
     [IO.Directory]::CreateDirectory((Join-Path $fixture 'scripts')) | Out-Null
     Copy-Item -LiteralPath (Join-Path $repo 'config/defaults.json') -Destination (Join-Path $fixture 'config/defaults.json')
@@ -31,6 +39,7 @@ try {
     $script:Spoken = $null
     function tts-say { param($Text,$Voice) $script:Spoken = $Text }
     function opencode {
+        $script:ReceivedInline=$env:OPENCODE_CONFIG_CONTENT
         ConvertTo-Json -Compress -Depth 5 @{type='text';part=@{text="Paris`n$footer"}}
         ConvertTo-Json -Compress -Depth 5 @{type='text';part=@{text=$footer;synthetic=$true}}
         $global:LASTEXITCODE = 0
@@ -38,6 +47,7 @@ try {
     $printed = @(localagent -v 'capital of France') -join "`n"
     Assert-Equal $printed 'Paris' 'Printed final answer is clean'
     Assert-Equal $script:Spoken 'Paris' 'Speech receives the same clean answer'
+    if($env:OPENCODE_CONFIG_CONTENT -cne $inheritedInline -or ($script:ReceivedInline|ConvertFrom-Json).provider.ollama.models.'qwen3:8b'.name -cne 'My model'){throw 'Wrapper did not preserve inherited model metadata or restore the parent environment'}
     $raw = @(localagent -v -l 'capital of France') -join "`n"
     $loggedText = @($raw -split "`n" | ForEach-Object { ($_ | ConvertFrom-Json).part.text })
     if ($loggedText -cnotcontains "Paris`n$footer") { throw 'FAIL: Full log must retain raw diagnostic events' }
@@ -45,6 +55,7 @@ try {
     Write-Host 'PASS: Real wrapper display, speech extraction and raw diagnostic logging'
 }
 finally {
+    $env:OPENCODE_CONFIG_CONTENT=$savedInline
     $absolute = [IO.Path]::GetFullPath($fixture)
     $temp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
     if (-not $absolute.StartsWith($temp, [StringComparison]::OrdinalIgnoreCase) -or

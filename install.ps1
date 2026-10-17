@@ -176,6 +176,7 @@ try {
         throw 'Configuration could not be parsed.'
     }
 
+    . (Get-StackSetupScript (Join-Path $repoRoot 'scripts\configuration.ps1'))
     . (Get-StackSetupScript (Join-Path $repoRoot 'tts\strategy-management.ps1'))
     if ($Check -and -not $Core -and -not ($Cloud -or $Local -or $Voice)) {
         $Cloud = $true
@@ -243,7 +244,8 @@ try {
         $selectedPackages = @()
         foreach ($engineId in $requestedEngines) {
             $ttsPackage = Get-TtsStrategy -Root $repoRoot -Id $engineId
-            if ($config.tts.device -ne 'auto' -and $config.tts.device -notin $ttsPackage.Manifest.devices) { throw 'Selected strategy does not support this device.' }
+            $engineDevice=Get-TtsConfiguredDevice $config $engineId
+            if ($engineDevice -ne 'auto' -and $engineDevice -notin $ttsPackage.Manifest.devices) { throw 'Selected strategy does not support this device.' }
             Write-Host "TTS package: $($ttsPackage.Manifest.name) $($ttsPackage.Manifest.version); licence: $($ttsPackage.Manifest.license)"
             foreach ($model in $ttsPackage.Manifest.models) {
                 $pin = if ($model.revision) { "revision $($model.revision)" } else { "SHA256 $($model.sha256)" }
@@ -292,7 +294,7 @@ try {
 
     if ($Voice) {
         Write-Host "TTS engine:   $($config.tts.engine)"
-        Write-Host "TTS device:   $($config.tts.device)"
+        Write-Host "TTS fallback device: $($config.tts.device)"
     }
 
     Write-Host ''
@@ -348,6 +350,8 @@ try {
         $trackingArguments.ManagedModelNames = @($localModelSelection) + @($localModelSelection | ForEach-Object { 'whas-' + (($_.ToLowerInvariant() -replace '[^a-z0-9-]', '-').Trim('-')) + '-ctx' + $config.agents.local.contextSize })
     }
     $operationLock = Enter-StackOperationLock $InstallPath
+    $previousInstallation=Read-StackInstallationState -Root $InstallPath -ReadOnly
+    $newInstallation=-not $previousInstallation -or $previousInstallation.Status -eq 'Uninstalled'
     $trackingSession = Start-StackInstallationTracking @trackingArguments
     foreach ($relative in @('uninstall.ps1','scripts\uninstall.ps1','scripts\installation-state.ps1','scripts\command-registration.ps1','scripts\script-invocation.ps1','scripts\configuration.ps1','scripts\agent-strategies.ps1','scripts\whas.ps1','tts\strategy-management.ps1','scripts\check-prerequisites.ps1')) {
         Copy-StackFile -Source (Join-Path $repoRoot $relative) -Destination (Join-Path $InstallPath $relative)
@@ -356,6 +360,9 @@ try {
         Copy-StackFile -Source (Join-Path $repoRoot $relative) -Destination (Join-Path $InstallPath $relative)
     }
     foreach($package in @(Get-TtsStrategies $repoRoot)) {
+        # Installed packages belong to their engine lifecycle and recorded hashes.
+        # Shared/cloud repair must not silently upgrade them via the catalogue.
+        if($previousInstallation.Status -ne 'Uninstalled' -and @($previousInstallation.TtsStrategies | Where-Object {$_ -and $_.Id -ceq $package.Manifest.id -and $_.PackageFiles}).Count){continue}
         foreach($asset in $package.Files) {
             $relative="tts/strategies/$($package.Manifest.id)/$asset"
             Copy-StackFile -Source (Join-Path $repoRoot $relative) -Destination (Join-Path $InstallPath $relative)
@@ -423,7 +430,7 @@ try {
         Write-Host ''
 
         foreach ($engineId in $requestedEngines) {
-            Invoke-StackSetupScript -Path $ttsInstallScript -Arguments @{InstallPath=$InstallPath;Device=[string]$config.tts.device;TtsEngine=$engineId}
+            Invoke-StackSetupScript -Path $ttsInstallScript -Arguments @{InstallPath=$InstallPath;Device=(Get-TtsConfiguredDevice $config $engineId);TtsEngine=$engineId}
             if ($LASTEXITCODE -ne 0) { throw "TTS strategy installation failed: $engineId." }
         }
         $selectedRuntime = Join-Path $InstallPath "tts/engines/$($config.tts.engine)/runtime.json"
@@ -500,6 +507,12 @@ try {
     if ($Core -or $Voice -or $Cloud -or $Local) {
         $runtimeConfigPath = Join-Path $InstallPath 'config/config.json'
         $runtimeConfig = if (Test-Path -LiteralPath $runtimeConfigPath) { Get-Content -LiteralPath $runtimeConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { [pscustomobject]@{} }
+        if (-not $runtimeConfig.agents) { $runtimeConfig | Add-Member -NotePropertyName agents -NotePropertyValue ([pscustomobject]@{}) }
+        foreach ($route in @('cloud','local')) {
+            if (-not $runtimeConfig.agents.$route) { $runtimeConfig.agents | Add-Member -NotePropertyName $route -NotePropertyValue ([pscustomobject]@{}) }
+            $selected=if($route -eq 'cloud'){[bool]$Cloud}else{[bool]$Local}
+            if($selected -or $newInstallation) { $runtimeConfig.agents.$route | Add-Member -NotePropertyName enabled -NotePropertyValue $selected -Force }
+        }
         if ($Voice) {
             if ($null -eq $runtimeConfig.tts) { $runtimeConfig | Add-Member -NotePropertyName tts -NotePropertyValue ([pscustomobject]@{}) }
             $runtimeConfig.tts | Add-Member -NotePropertyName engine -NotePropertyValue $config.tts.engine -Force

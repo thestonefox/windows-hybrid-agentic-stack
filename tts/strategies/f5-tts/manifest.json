@@ -76,6 +76,10 @@
     }
   ],
   "voiceReference": {
-    "transcriptRequired": true
+    "transcriptRequired": true,
+    "files": [
+      "{name}.wav",
+      "{name}.txt"
+    ]
   }
 }

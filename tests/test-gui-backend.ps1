@@ -16,6 +16,13 @@ try {
     if([WindowsHybridAgenticStack.WhasWindow]::IsConfigured($stateRoot)) { throw 'Missing shared files opened usage' }
     [IO.File]::WriteAllText((Join-Path $stateRoot 'config/defaults.json'),'{}')
     if(-not [WindowsHybridAgenticStack.WhasWindow]::IsConfigured($stateRoot)) { throw 'Installed root failed to open usage' }
+    $entries=1..20000|ForEach-Object {'{"Path":"runtime/file-'+$_+'.py","SHA256":"'+('0'*64)+'"}'}
+    $largeRecord='{"Status":"Installed","Files":['+($entries -join ',')+']}'
+    if($largeRecord.Length -le 2097152){throw 'Large-record fixture does not exceed the default parser limit'}
+    [IO.File]::WriteAllText((Join-Path $stateRoot '.whas-installation.json'),$largeRecord)
+    if(-not [WindowsHybridAgenticStack.WhasWindow]::IsConfigured($stateRoot)){throw 'Large installed ownership record incorrectly opens setup'}
+    [IO.File]::WriteAllText((Join-Path $stateRoot '.whas-installation.json'),$largeRecord.Replace('"Status":"Installed"','"Status":"Interrupted"'))
+    if([WindowsHybridAgenticStack.WhasWindow]::IsConfigured($stateRoot)){throw 'Large interrupted ownership record incorrectly opens usage'}
     [IO.File]::WriteAllText((Join-Path $stateRoot '.whas-installation.json'),'invalid')
     if([WindowsHybridAgenticStack.WhasWindow]::IsConfigured($stateRoot)) { throw 'Malformed state opened usage' }
     # Inspect/rebuild controls without showing or activating a desktop window.
@@ -24,9 +31,51 @@ try {
         $flags=[Reflection.BindingFlags]'NonPublic,Instance'
         $tabs=$window.GetType().GetField('tabs',$flags).GetValue($window)
         if($tabs.TabPages[0].Text -ne 'Features') { throw 'First-run page was not feature configuration' }
+        $route=$window.GetType().GetField('defaultLocation',$flags).GetValue($window)
+        if(($route.Items -join ',') -cne 'cloud,local' -or $route.SelectedItem -cne 'cloud'){throw 'Fresh setup must show an explicit Cloud or Local default'}
+        $selection=$window.GetType().GetMethod('Selection',$flags)
+        # Inspect base-only arguments without invoking the installer.
+        foreach($name in @('cloud','local','voice')){$window.GetType().GetField($name,$flags).GetValue($window).Checked=$false}
+        foreach($value in @('cloud','local')){
+            $route.SelectedItem=$value
+            $arguments=$selection.Invoke($window,@())
+            $index=[array]::IndexOf($arguments,'--default-location')
+            if($index -lt 0 -or $arguments[$index+1] -cne $value){throw 'Setup omitted or changed the displayed default location'}
+        }
+        $savedConfig=Join-Path $stateRoot 'config/config.json'
+        [IO.File]::WriteAllText($savedConfig,'{"interaction":{"location":"local"}}')
+        $window.GetType().GetMethod('BuildPages',$flags).Invoke($window,@())|Out-Null
+        $route=$window.GetType().GetField('defaultLocation',$flags).GetValue($window)
+        if($route.SelectedItem -cne 'local'){throw 'Feature reconfiguration lost the saved Local default'}
+        $destination=$window.GetType().GetField('destination',$flags).GetValue($window)
+        $destination.Text=Join-Path $fixture 'another-fresh-root'
+        if($route.SelectedItem -cne 'cloud'){throw 'New destination retained another installation default'}
+        [IO.File]::WriteAllText($savedConfig,'{"interaction":{"location":"cloud"}}')
+        $destination.Text=$stateRoot
+        if($route.SelectedItem -cne 'cloud'){throw 'Destination change failed to load the saved Cloud default'}
+        [IO.File]::WriteAllText($savedConfig,'{"interaction":{"location":"automatic"}}')
+        $window.GetType().GetMethod('LoadDefaultLocation',$flags).Invoke($window,@())|Out-Null
+        if($route.SelectedIndex -ne -1){throw 'Invalid saved location silently selected a route'}
+        $rejected=$false
+        try {$null=$selection.Invoke($window,@())}catch{$rejected=$_.Exception.InnerException.Message -like '*Choose Cloud or This PC*'}
+        if(-not $rejected){throw 'Setup accepted an unspecified default location'}
+        Remove-Item -LiteralPath $savedConfig
+        $window.GetType().GetMethod('LoadDefaultLocation',$flags).Invoke($window,@())|Out-Null
+        if($window.GetType().GetField('details',$flags).GetValue($window).Visible) { throw 'Diagnostics consume first-run content space' }
+        foreach($field in @('defaultModel','defaultEngine')) {
+            $control=$window.GetType().GetField($field,$flags).GetValue($window)
+            if(-not $control.AccessibleName.StartsWith('Default ')) { throw 'Default selector has no accessible label' }
+        }
+        $window.RenderPages((Join-Path $fixture 'first-run-pages'))
+        $bitmap=New-Object Drawing.Bitmap((Join-Path $fixture 'first-run-pages\00.png'))
+        try {
+            $colours=New-Object 'Collections.Generic.HashSet[int]'
+            for($x=24;$x -lt $bitmap.Width-24;$x+=8) { for($y=50;$y -lt $bitmap.Height-24;$y+=8) { $null=$colours.Add($bitmap.GetPixel($x,$y).ToArgb()) } }
+            if($colours.Count -lt 12) { throw 'Offscreen render omitted the controls' }
+        } finally { $bitmap.Dispose() }
         $window.GetType().GetField('setup',$flags).SetValue($window,$false)
         $window.GetType().GetMethod('BuildPages',$flags).Invoke($window,@())|Out-Null
-        if($tabs.TabPages[0].Text -ne 'Ask & chat' -or @($tabs.TabPages|Where-Object Text -eq 'Remove WHAS').Count -ne 1) { throw 'Configured view lacks usage or same-window removal' }
+        if($tabs.TabPages[0].Text -ne 'Assistant' -or @($tabs.TabPages|Where-Object Text -eq 'Remove WHAS').Count -ne 1) { throw 'Configured view lacks usage or same-window removal' }
         $window.GetType().GetMethod('OpenSetup',$flags).Invoke($window,@())|Out-Null
         if($tabs.SelectedTab.Text -ne 'Features') { throw 'Feature management launched outside the application' }
         $window.GetType().GetField('setup',$flags).SetValue($window,$true)
@@ -106,6 +155,34 @@ public static class GuiLifecycleTest {
     } finally { if(-not $locked.HasExited) {$locked.Kill();$locked.WaitForExit()};$locked.Dispose() }
     $exe=Join-Path $fixture 'whas-gui.exe'
     & (Join-Path $repo 'scripts/build-gui.ps1') -OutputPath $exe
+    # Drive the real graphical backend and UI event queue without showing a form.
+    $checksWindow=New-Object WindowsHybridAgenticStack.WhasWindow($true,$exe,'[]',$stateRoot)
+    try {
+        $flags=[Reflection.BindingFlags]'NonPublic,Instance'
+        foreach($field in @('cloud','local','voice')) { $checksWindow.GetType().GetField($field,$flags).GetValue($checksWindow).Checked=$false }
+        $null=$checksWindow.Handle
+        $checksWindow.GetType().GetMethod('PrepareRender',[Reflection.BindingFlags]'NonPublic,Static').Invoke($null,[object[]]@($checksWindow.PSObject.BaseObject))|Out-Null
+        $checkTabs=$checksWindow.GetType().GetField('tabs',$flags).GetValue($checksWindow)
+        $grid=$checksWindow.GetType().GetField('checkGrid',$flags).GetValue($checksWindow)
+        $checkTabs.SelectedIndex=2
+        for($attempt=0;$attempt -lt 2;$attempt++) {
+            if($attempt -gt 0) {$checksWindow.GetType().GetMethod('CheckPrerequisites',$flags).Invoke($checksWindow,@())|Out-Null}
+            $deadline=[DateTime]::UtcNow.AddSeconds(60)
+            do {
+                [Windows.Forms.Application]::DoEvents()
+                $current=$checksWindow.GetType().GetField('operation',$flags).GetValue($checksWindow)
+                $passed=$checksWindow.GetType().GetField('checkPassed',$flags).GetValue($checksWindow)
+                if($current -and -not $current.Running -and $passed) {break}
+                Start-Sleep -Milliseconds 50
+            } while([DateTime]::UtcNow -lt $deadline)
+            if(-not $passed -or $grid.Rows.Count -lt 2) {
+                $diagnostic=$checksWindow.GetType().GetField('output',$flags).GetValue($checksWindow).Text
+                $state=$checksWindow.GetType().GetField('status',$flags).GetValue($checksWindow).Text
+                throw "Initial/repeated graphical prerequisite check failed: $state; rows=$($grid.Rows.Count); $diagnostic"
+            }
+        }
+        Write-Host 'PASS: initial and repeated real WinExe checks populate the GUI grid without a console'
+    } finally { $checksWindow.Dispose() }
     $render=Join-Path $fixture 'client.png'
     $process=Start-Process -FilePath $exe -ArgumentList @('--render',$render) -WindowStyle Hidden -PassThru
     try { if(-not $process.WaitForExit(20000)) { $process.Kill(); throw 'GUI render timed out' }; if($process.ExitCode) { throw 'GUI render failed' } } finally { $process.Dispose() }

@@ -19,6 +19,11 @@ function Merge-Configuration {
 
         $targetProperty = $Target.PSObject.Properties[$name]
 
+        if ($Prefix -eq 'tts.deviceDefaults' -and $null -eq $targetProperty) {
+            if ($name -cnotmatch '^[a-z][a-z0-9-]{0,47}$' -or $property.Value -isnot [string] -or $property.Value -cnotin @('auto','cpu','cuda')) { throw 'Invalid engine device default.' }
+            $Target | Add-Member -NotePropertyName $name -NotePropertyValue $property.Value
+            continue
+        }
         if ($Prefix -eq 'tts.voiceDefaults' -and $null -eq $targetProperty) {
             if ($name -cnotmatch '^[a-z][a-z0-9-]{0,47}$' -or $property.Value -isnot [string] -or $property.Value -cnotmatch '^[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}$') { throw 'Invalid engine voice default.' }
             $Target | Add-Member -NotePropertyName $name -NotePropertyValue $property.Value
@@ -55,6 +60,12 @@ function Assert-Configuration {
         if ($Config.interaction.location -notin @('local','cloud')) { $errors.Add('interaction.location must be local or cloud') }
         if ($null -ne $Config.interaction.runtime -and $Config.interaction.runtime -cnotmatch '^[a-z][a-z0-9-]{0,47}$') { $errors.Add('interaction.runtime must be a strategy ID or null') }
         if ($Config.interaction.speech -isnot [bool]) { $errors.Add('interaction.speech must be a boolean') }
+    }
+    if ($Config.tts.deviceDefaults) {
+        if ($Config.tts.deviceDefaults -isnot [pscustomobject]) { $errors.Add('tts.deviceDefaults must be an object') }
+        else {foreach($entry in $Config.tts.deviceDefaults.PSObject.Properties) {
+            if($entry.Name -cnotmatch '^[a-z][a-z0-9-]{0,47}$' -or $entry.Value -isnot [string] -or $entry.Value -cnotin @('auto','cpu','cuda')) {$errors.Add('Invalid engine device default')}
+        }}
     }
     if ($Config.tts.voiceDefaults) {
         if ($Config.tts.voiceDefaults -isnot [pscustomobject]) { $errors.Add('tts.voiceDefaults must be an object') }
@@ -188,4 +199,28 @@ function Get-StackConfiguration {
     $errors = @(Assert-Configuration -Config $config)
     if ($errors.Count -gt 0) { throw ($errors -join [Environment]::NewLine) }
     return $config
+}
+
+function Get-TtsConfiguredDevice {
+    param($Config,[string]$Engine)
+    if($Config.tts.deviceDefaults -and $Config.tts.deviceDefaults.PSObject.Properties[$Engine]) {return [string]$Config.tts.deviceDefaults.$Engine}
+    return [string]$Config.tts.device
+}
+function Test-TtsGpuAvailable {
+    $gpu=Get-Command nvidia-smi -ErrorAction Ignore
+    if(-not $gpu){return $false}
+    try {$result=& $gpu.Source -L 2>$null;return ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace(($result|Out-String)))}catch{return $false}
+}
+
+function Resolve-TtsInstallDevice {
+    param([string]$Device,$Manifest)
+    if($Device -eq 'auto') {
+        if('cuda' -in $Manifest.devices -and (Test-TtsGpuAvailable)) {Write-Host "$($Manifest.name): using GPU.";return 'cuda'}
+        if('cpu' -notin $Manifest.devices){throw 'GPU unavailable and this engine does not support CPU.'}
+        if('cuda' -in $Manifest.devices){Write-Host "$($Manifest.name): GPU unavailable - using CPU."}else{Write-Host "$($Manifest.name): using CPU."}
+        return 'cpu'
+    }
+    if($Device -notin $Manifest.devices){throw 'Device is not supported by this strategy.'}
+    Write-Host "$($Manifest.name): using $Device."
+    return $Device
 }

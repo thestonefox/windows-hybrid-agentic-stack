@@ -182,7 +182,7 @@ namespace WindowsHybridAgenticStack {
                     var output = ps.Invoke();
                     foreach (var error in ps.Streams.Error) Console.Error.WriteLine(error);
                     return new CommandScriptResult { Output = output,
-                        ExitCode = host.ExitRequested ? host.ExitCode : (ps.HadErrors ? 1 : 0) };
+                        ExitCode = host.ExitRequested ? host.ExitCode : (ps.Streams.Error.Count != 0 ? 1 : 0) };
                 }
             }
         }
@@ -251,16 +251,19 @@ namespace WindowsHybridAgenticStack {
 
         [STAThread]
         public static int Main(string[] args) {
-            var previousEncoding = Console.OutputEncoding;
-            if(Environment.GetEnvironmentVariable("WHAS_PROGRESS_EVENTS")=="1") Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+            if(Environment.GetEnvironmentVariable("WHAS_PROGRESS_EVENTS")=="1") {
+                var utf8=new System.Text.UTF8Encoding(false);
+                Console.SetOut(new StreamWriter(Console.OpenStandardOutput(),utf8){AutoFlush=true});
+                Console.SetError(new StreamWriter(Console.OpenStandardError(),utf8){AutoFlush=true});
+            }
             try { return Run(args); }
             catch (Exception error) { Console.Error.WriteLine("Stack command error: " + error.Message); return 1; }
-            finally { Console.OutputEncoding = previousEncoding; }
         }
 
         private static int Run(string[] args) {
             string executable = Process.GetCurrentProcess().MainModule.FileName;
             string command = Path.GetFileNameWithoutExtension(executable).ToLowerInvariant();
+            if (command == "tts-help") { command="whas";args=new[]{"tts","--help"}; }
             bool isUnified = command == "whas";
             bool isAgent = Array.IndexOf(Agents, command) >= 0 || isUnified;
             if (!isAgent && !TtsParameters.ContainsKey(command)) throw new ArgumentException("Unknown stack command: " + command);
@@ -332,9 +335,12 @@ namespace WindowsHybridAgenticStack {
                         finally { Console.CancelKeyPress -= cancel; }
                     }
                     if (host.ExitRequested) return host.ExitCode;
-                    if (ps.HadErrors) return 1;
-                    object nativeExit = runspace.SessionStateProxy.GetVariable("LASTEXITCODE");
-                    return nativeExit is int ? (int)nativeExit : 0;
+                    // HadErrors also includes failures caught by readiness probes.
+                    // Only errors that escaped the command are command failures.
+                    if (ps.Streams.Error.Count != 0) return 1;
+                    // Commands validate native results themselves. LASTEXITCODE
+                    // may belong to a failed optional GPU/readiness probe.
+                    return 0;
                 }
             }
         }

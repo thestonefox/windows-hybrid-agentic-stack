@@ -26,6 +26,7 @@ function Invoke-RestrictedSetup {
     $arguments = @($SetupArguments | ForEach-Object { Quote-Literal $_ }) -join ','
     $code = @"
 `$ErrorActionPreference='Stop'
+[Console]::InputEncoding=New-Object Text.UTF8Encoding(`$false)
 if ((Get-ExecutionPolicy) -ne 'Restricted') { throw 'Test child is not Restricted' }
 `$env:WHAS_TEST_PREREQUISITE_FAIL='$([int][bool]$FailPrerequisites)'
 `$env:WHAS_TEST_AGENT_FAIL='$([int][bool]$FailAgentSetup)'
@@ -51,8 +52,11 @@ exit `$actual
     try {
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
-        if ($null -ne $InputText) { $process.StandardInput.Write($InputText) }
-        $process.StandardInput.Close()
+        if ($null -ne $InputText) {
+            $inputBytes=(New-Object Text.UTF8Encoding($false)).GetBytes($InputText)
+            $process.StandardInput.BaseStream.Write($inputBytes,0,$inputBytes.Length)
+        }
+        $process.StandardInput.BaseStream.Close()
         if (-not $process.WaitForExit(60000)) { $process.Kill(); throw 'Restricted test child timed out.' }
         $output = $stdout.Result + $stderr.Result
         if ($process.ExitCode -ne $ExpectedExit) { Write-Host $output; throw "FAIL: Child exit $($process.ExitCode), expected $ExpectedExit" }
@@ -64,7 +68,7 @@ try {
     # Build a disposable source fixture with a deterministic prerequisite checker.
     $source = Join-Path $fixture 'source'
     foreach ($relative in @('install.ps1','uninstall.ps1','scripts\command-host.cs','scripts\setup-host.cs','scripts\setup-runtime.cs','scripts\build-setup.ps1',
-        'scripts\setup-preview.ps1','scripts\configuration.ps1','scripts\gui-host.cs','scripts\build-gui.ps1','scripts\build-setup.ps1','scripts\setup-host.cs','scripts\setup-runtime.cs','scripts\agent-strategies.ps1','scripts\whas.ps1','agents\strategies\opencode\manifest.json','agents\strategies\opencode\adapter.ps1','config\defaults.json','config\AGENTS.md','scripts\script-invocation.ps1',
+        'scripts\setup-preview.ps1','scripts\configuration.ps1','scripts\gui-host.cs','scripts\gui-maintenance.ps1','scripts\fluent-gui.cs','scripts\gui-theme.xaml','scripts\build-gui.ps1','scripts\build-setup.ps1','scripts\setup-host.cs','scripts\setup-runtime.cs','scripts\agent-strategies.ps1','scripts\whas.ps1','agents\strategies\opencode\manifest.json','agents\strategies\opencode\adapter.ps1','config\defaults.json','config\AGENTS.md','scripts\script-invocation.ps1',
         'scripts\setup-agents.ps1','scripts\install-agent-commands.ps1','scripts\command-registration.ps1','scripts\profile-loader.ps1',
         'scripts\config.ps1','scripts\agent-commands.ps1','scripts\installation-state.ps1','scripts\uninstall.ps1',
         'tts\install-tts.ps1','tts\tts.ps1','tts\tts_service.py', 'tts\strategy-management.ps1', 'tts\engine-management.ps1', 'tts\strategy.schema.json', 'tts\strategies\chatterbox-turbo\manifest.json', 'tts\strategies\chatterbox-turbo\install.ps1', 'tts\strategies\chatterbox-turbo\uninstall.ps1', 'tts\strategies\chatterbox-turbo\backend.py', 'tts\strategies\chatterbox-turbo\requirements.txt', 'tts\strategies\chatterbox-turbo\prepare_model.py')) {
@@ -76,6 +80,7 @@ try {
     Add-Content -LiteralPath (Join-Path $source 'scripts\installation-state.ps1') -Value "`r`nfunction Get-StackOllamaModels { return @() }"
     [IO.File]::WriteAllText((Join-Path $source 'scripts\check-prerequisites.ps1'), @'
 param([switch]$Cloud,[switch]$Local,[switch]$Voice,[string]$StrategyManifestJson)
+Write-Error 'Expected optional discovery probe' -ErrorAction SilentlyContinue
 Write-Host "CHECK Cloud=$Cloud Local=$Local Voice=$Voice POLICY=$(Get-ExecutionPolicy)"
 'CHECK PIPELINE OUTPUT'
 if ($env:WHAS_TEST_PREREQUISITE_FAIL -eq '1') { exit 1 }
@@ -104,6 +109,24 @@ exit 0
     $portableExe = Join-Path $portable 'whas-setup-preview.exe'
     & (Join-Path $source 'scripts\build-setup.ps1') -OutputPath $portableExe
     Assert-True (Test-Path -LiteralPath $portableExe) 'Prototype built'
+    # Exercise the actual WinExe backend with pipes and no console handle.
+    $graphicalExe=Join-Path $portable 'whas-gui.exe'
+    & (Join-Path $source 'scripts\build-setup.ps1') -Graphical -OutputPath $graphicalExe
+    foreach($fails in @('0','1')) {
+        $checkStart=New-Object Diagnostics.ProcessStartInfo
+        $checkStart.FileName=$graphicalExe; $checkStart.Arguments='--check --local'
+        $checkStart.UseShellExecute=$false; $checkStart.CreateNoWindow=$true
+        $checkStart.RedirectStandardOutput=$true; $checkStart.RedirectStandardError=$true
+        $checkStart.StandardOutputEncoding=[Text.Encoding]::UTF8; $checkStart.StandardErrorEncoding=[Text.Encoding]::UTF8
+        $checkStart.EnvironmentVariables['WHAS_PROGRESS_EVENTS']='1'
+        $checkStart.EnvironmentVariables['WHAS_TEST_PREREQUISITE_FAIL']=$fails
+        $checkProcess=[Diagnostics.Process]::Start($checkStart)
+        try {
+            $stdout=$checkProcess.StandardOutput.ReadToEndAsync(); $stderr=$checkProcess.StandardError.ReadToEndAsync()
+            if(-not $checkProcess.WaitForExit(60000)) { $checkProcess.Kill(); throw 'Graphical prerequisite check timed out' }
+            Assert-True ($checkProcess.ExitCode -eq [int]$fails -and $stdout.Result.Contains('CHECK PIPELINE OUTPUT') -and -not $stderr.Result.Contains('handle is invalid')) 'WinExe prerequisite check returns results and success/failure without a console'
+        } finally { $checkProcess.Dispose() }
+    }
     $fingerprintBefore=(& (Join-Path $source 'scripts/build-setup.ps1') -Fingerprint -Force|Out-String).Trim()
     $inputPath=Join-Path $source 'install.ps1'
     $inputBytes=[IO.File]::ReadAllBytes($inputPath)
@@ -172,6 +195,17 @@ exit 0
     $hash = (Get-FileHash -LiteralPath $ownershipPath).Hash
     $start=New-Object Diagnostics.ProcessStartInfo
     Assert-True ((Test-Path -LiteralPath (Join-Path $target 'whas-gui.exe')) -and -not (Test-Path -LiteralPath (Join-Path $target 'whas-setup.exe'))) 'Single self-contained graphical application installed'
+    $commandStart=New-Object Diagnostics.ProcessStartInfo
+    $commandStart.FileName=Join-Path $fakeUser '.windows-hybrid-agentic-stack\bin\whas.exe'; $commandStart.Arguments='--help'
+    $commandStart.UseShellExecute=$false; $commandStart.CreateNoWindow=$true
+    $commandStart.RedirectStandardOutput=$true; $commandStart.RedirectStandardError=$true
+    $commandStart.EnvironmentVariables['WHAS_PROGRESS_EVENTS']='1'
+    $commandProcess=[Diagnostics.Process]::Start($commandStart)
+    try {
+        $commandOut=$commandProcess.StandardOutput.ReadToEndAsync(); $commandErr=$commandProcess.StandardError.ReadToEndAsync()
+        if(-not $commandProcess.WaitForExit(60000)) { $commandProcess.Kill(); throw 'Graphical command child timed out' }
+        Assert-True ($commandProcess.ExitCode -eq 0 -and $commandOut.Result -match 'whas' -and $commandErr.Result -notmatch 'handle is invalid') 'Installed command supports GUI progress pipes without a console'
+    } finally { $commandProcess.Dispose() }
     $start.FileName=Join-Path $target 'whas-gui.exe'; $start.Arguments='--uninstall --apply --yes'
     $start.UseShellExecute=$false; $start.CreateNoWindow=$true; $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
     $self=[Diagnostics.Process]::Start($start)

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 [CmdletBinding()]
 param()
 $ErrorActionPreference = 'Stop'
@@ -83,6 +83,29 @@ try {
     [IO.File]::SetAttributes($hidden,([IO.File]::GetAttributes($hidden) -bor [IO.FileAttributes]::Hidden))
     Install-StackCommandRegistration -InstallPath $session.Root -PersistPath $false
     Complete-StackInstallationTracking $session $true
+    # Updated launchers can leave verified backups for every command, including
+    # whas and tts-help. Preview must accept these without widening path access.
+    $state=Read-StackInstallationState $session.Root
+    $bin=Join-Path $env:USERPROFILE '.windows-hybrid-agentic-stack\bin'
+    $backups=@(foreach($name in @('whas.exe','tts-help.exe','install-root.txt')) {
+        $leaf=$name+'.bak.'+[guid]::NewGuid().ToString('N')
+        $file=Join-Path $bin $leaf
+        Write-Fixture $file 'old registered command'
+        [pscustomobject]@{Name=$leaf;SHA256=(Get-StackFileSHA256 $file)}
+    })
+    $state.RegistrationBackups=$backups
+    Write-StackInstallationState $session.Root $state
+    $checked=Get-StackUninstallPlan $session.Root
+    Assert-True ($checked.RegistrationBackups.Count -eq 3) 'Preview accepts whas, tts-help and install-root backups'
+    foreach($bad in @(('unknown.exe.bak.'+('a'*32)),('../whas.exe.bak.'+('a'*32)),'whas.exe.bak.invalid')) {
+        $state.RegistrationBackups=@([pscustomobject]@{Name=$bad;SHA256=$backups[0].SHA256})
+        Write-StackInstallationState $session.Root $state
+        $rejected=$false
+        try {$null=Get-StackUninstallPlan $session.Root} catch {if($_.Exception.Message -like '*Invalid registration backup name*'){$rejected=$true}else{throw}}
+        Assert-True $rejected 'Malformed or unrecognized backup names remain rejected'
+    }
+    $state.RegistrationBackups=$backups
+    Write-StackInstallationState $session.Root $state
     $manifest = Join-Path $session.Root '.whas-installation.json'
     $manifestHash = Get-StackFileSHA256 $manifest
     $plan = Get-StackUninstallPlan $session.Root
@@ -117,7 +140,7 @@ try {
         try { $null = Get-StackFileSHA256 $logPath } catch { $ordinaryHashRejected = $true }
         Assert-True $ordinaryHashRejected 'Fixture reproduces the default hash reader conflict with an open writer'
         Complete-StackInstallationTracking $session $true
-        $manifest = Join-Path $session.Root '.whas-installation.json'
+    $manifest = Join-Path $session.Root '.whas-installation.json'
         $manifestHash = Get-StackFileSHA256 $manifest
         $plan = Get-StackUninstallPlan $session.Root
         Assert-True (@($plan.DeleteFiles | Where-Object Path -eq 'tts/service.log').Count -eq 1) 'Preview can hash a generated log while the service holds it open'

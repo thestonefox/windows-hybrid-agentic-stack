@@ -37,8 +37,13 @@ function Read-TtsStrategy {
     foreach ($cap in @('builtinVoice','voiceCloning')) { if ($m.capabilities.$cap -isnot [bool]) { throw "Invalid capability: $cap" } }
     if ($m.PSObject.Properties.Name -contains 'voiceReference') {
         if ($m.voiceReference -isnot [pscustomobject] -or
-            @(Compare-Object @('transcriptRequired') @($m.voiceReference.PSObject.Properties.Name)).Count -or
+            @($m.voiceReference.PSObject.Properties.Name | Where-Object { $_ -notin @('transcriptRequired','files') }).Count -or
             $m.voiceReference.transcriptRequired -isnot [bool] -or -not $m.capabilities.voiceCloning) { throw 'Invalid voice reference requirements.' }
+        if ($m.voiceReference.PSObject.Properties.Name -contains 'files') {
+            if ($m.voiceReference.files -isnot [array] -or $m.voiceReference.files.Count -lt 1 -or $m.voiceReference.files.Count -gt 4 -or
+                @($m.voiceReference.files | Where-Object { $_ -isnot [string] -or $_.Length -gt 80 -or $_ -cnotmatch '^\{name\}[A-Za-z0-9_.-]*\.(wav|pt|txt)$' }).Count -or
+                @($m.voiceReference.files | Select-Object -Unique).Count -ne $m.voiceReference.files.Count) { throw 'Invalid voice reference file patterns.' }
+        }
     }
     if ($m.files -isnot [array] -or $m.files.Count -eq 0) { throw 'Strategy files must be an explicit list.' }
     $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -87,6 +92,32 @@ function Get-TtsStrategy {
     $selected = @($packages | Where-Object { $_.Manifest.id -ceq $Id })
     if ($selected.Count -ne 1) { throw "TTS strategy unavailable: $Id" }
     return $selected[0]
+}
+
+function Get-TtsReferenceNames {
+    param([string]$Root,$Package,$Record)
+    if (-not $Package.Manifest.capabilities.voiceCloning -or -not $Record -or $Record.Status -ne 'Installed') { return }
+    $patterns=@($Package.Manifest.voiceReference.files)
+    # Compatibility with packages installed before file patterns were declared.
+    if (-not $patterns.Count -or -not $patterns[0]) {
+        $patterns=@(if ($Package.Manifest.id -ceq 'chatterbox-turbo') { @('{name}_prompt.pt') }
+                  elseif ($Package.Manifest.voiceReference.transcriptRequired) { @('{name}.wav','{name}.txt') }
+                  else { @('{name}.wav') })
+    }
+    $directory=Resolve-TtsPackagePath $Root $Record.Context.VoicesPath
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) { return }
+    $suffix=$patterns[0].Substring(6)
+    foreach ($file in Get-ChildItem -LiteralPath $directory -File) {
+        if (-not $file.Name.EndsWith($suffix,[StringComparison]::Ordinal)) { continue }
+        $name=$file.Name.Substring(0,$file.Name.Length-$suffix.Length)
+        if ($name -ceq 'default' -or $name -cnotmatch '^[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}$') { continue }
+        $complete=$true
+        foreach ($pattern in $patterns) {
+            $path=Resolve-TtsPackagePath $Root ($Record.Context.VoicesPath+'/'+$pattern.Replace('{name}',$name))
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { $complete=$false; break }
+        }
+        if ($complete) { $name }
+    }
 }
 
 function Select-TtsEngine {

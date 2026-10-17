@@ -25,6 +25,7 @@ $bundledCount=@(Get-ChildItem -LiteralPath (Join-Path $source 'tts/strategies') 
 $fake=Join-Path $source 'tts/strategies/test-engine'
 $manifest=Get-Content -LiteralPath (Join-Path $repo 'tts/strategies/chatterbox-turbo/manifest.json') -Raw | ConvertFrom-Json
 $manifest.id='test-engine';$manifest.name='Test engine';$manifest.capabilities.voiceCloning=$false
+$manifest.PSObject.Properties.Remove('voiceReference')
 $manifest.devices=@('cpu');$manifest.models=@();$manifest.prerequisites.visualCpp=$false
 $manifest.files=@('install.ps1','uninstall.ps1','backend.py')
 Write-Fixture (Join-Path $fake 'manifest.json') ($manifest|ConvertTo-Json -Depth 12)
@@ -106,9 +107,19 @@ try {
     }
     & (Join-Path $source 'install.ps1') -Voice -TtsEngine test-engine -Yes -PersistCommandPath $false -InstallPath $install
     Assert-True ($LASTEXITCODE -eq 0) 'Repeat installation uses the same owned environment'
+    $installedManifest=Join-Path $install 'tts/strategies/test-engine/manifest.json'
+    $installedHash=(Get-FileHash -LiteralPath $installedManifest).Hash
+    $changedCatalog=$bad|ConvertFrom-Json;$changedCatalog.version='1.0.1'
+    Write-Fixture (Join-Path $fake 'manifest.json') ($changedCatalog|ConvertTo-Json -Depth 12)
+    & (Join-Path $source 'install.ps1') -Core -Yes -PersistCommandPath $false -InstallPath $install
+    $repaired=Get-Content -LiteralPath (Join-Path $install '.whas-installation.json') -Raw|ConvertFrom-Json
+    $trackedManifest=@($repaired.TtsStrategies[0].PackageFiles|Where-Object Path -ceq 'tts/strategies/test-engine/manifest.json')[0]
+    Assert-True ($LASTEXITCODE -eq 0 -and (Get-FileHash -LiteralPath $installedManifest).Hash -ceq $installedHash -and $trackedManifest.SHA256 -ceq $installedHash) 'Shared repair preserves installed engine package and integrity record despite a newer catalog'
     & (Join-Path $source 'install.ps1') -Voice -TtsEngine another-engine -Yes -PersistCommandPath $false -InstallPath $install
     $multiEngine=Get-Content -LiteralPath (Join-Path $install '.whas-installation.json') -Raw | ConvertFrom-Json
     Assert-True ($LASTEXITCODE -eq 0 -and $multiEngine.TtsStrategies.Count -eq 2 -and $multiEngine.TtsStrategies.Id -contains 'test-engine' -and $multiEngine.TtsStrategies.Id -contains 'another-engine') 'A second engine installs without replacing the first'
+    Assert-True ((Get-FileHash -LiteralPath $installedManifest).Hash -ceq $installedHash) 'Installing another engine does not upgrade an existing engine through catalog copying'
+    Write-Fixture (Join-Path $fake 'manifest.json') $bad
     & {
         . (Join-Path $install 'tts/tts.ps1') -InstallPath $install
         $script:FixtureActive = $null
@@ -226,6 +237,10 @@ try {
     Assert-True ($LASTEXITCODE -eq 0 -and $reinstalled.TtsStrategies[0].Id -ceq 'chatterbox-turbo' -and [IO.File]::ReadAllText((Join-Path $install 'voices/test-engine/personal.txt')) -ceq 'preserve') 'Native engine selection after completed uninstall preserves retained personal voices'
     & $setupExe --uninstall --install-path $install --apply --yes --no-path
     Assert-True ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath (Join-Path $install 'voices/test-engine/personal.txt'))) 'Native cleanup after engine change preserves the original user data'
+    & $setupExe --install --core --install-path $install --yes --no-path
+    Assert-True ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath (Join-Path $install 'tts/strategies/chatterbox-turbo/manifest.json'))) 'Base reinstall after completed removal restores available catalog packages'
+    & $setupExe --uninstall --install-path $install --apply --yes --no-path
+    Assert-True ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath (Join-Path $install 'voices/test-engine/personal.txt'))) 'Base reinstall cleanup keeps retained voices'
     $nativeInstall=Join-Path $fixture 'native-install'
     & $setupExe --install --voice --tts-engine test-engine --install-path $nativeInstall --yes --no-path
     Assert-True ($LASTEXITCODE -eq 0) 'Standalone EXE installs the bundled drop-in package after source removal'

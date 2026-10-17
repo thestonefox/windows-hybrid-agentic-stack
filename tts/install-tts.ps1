@@ -39,20 +39,12 @@ function Invoke-CheckedCommand {
 try {
     $config = Get-StackConfiguration -Root $repoRoot
     if (-not $TtsEngine) { $TtsEngine = $config.tts.engine }
-    if (-not $Device) { $Device = $config.tts.device }
+    if (-not $Device) { $Device = Get-TtsConfiguredDevice $config $TtsEngine }
     if (-not $InstallPath) { $InstallPath = $config.installation.directory }
     if (-not $InstallPath) { $InstallPath = Join-Path $HOME 'AI\WindowsHybridAgenticStack' }
     $InstallPath = Assert-StackInstallationRoot ([IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($InstallPath)))
     $package = Get-TtsStrategy -Root $repoRoot -Id $TtsEngine
-    if ($Device -ne 'auto' -and $Device -notin $package.Manifest.devices) { throw 'Device is not supported by this strategy.' }
-    if ($Device -eq 'auto') {
-        $Device = 'cpu'
-        if ('cuda' -in $package.Manifest.devices -and (Get-Command nvidia-smi -ErrorAction Ignore)) {
-            $null = & nvidia-smi -L 2>$null
-            if ($LASTEXITCODE -eq 0) { $Device = 'cuda' }
-        }
-        if ($Device -notin $package.Manifest.devices) { throw 'No supported device is available.' }
-    }
+    $Device = Resolve-TtsInstallDevice $Device $package.Manifest
     $state = Read-StackInstallationState $InstallPath
     if ($null -eq $state) { throw 'Run the root installer so strategy resources are ownership-tracked.' }
     $existing = @($state.TtsStrategies | Where-Object { $_ -and $_.Id -eq $TtsEngine })
@@ -121,6 +113,7 @@ try {
     }
     # Keep a verified catalog so additional engines can be installed later.
     foreach ($catalogPackage in @(Get-TtsStrategies -Root $repoRoot)) {
+        if($catalogPackage.Manifest.id -cne $TtsEngine -and @($state.TtsStrategies | Where-Object {$_ -and $_.Id -ceq $catalogPackage.Manifest.id -and @($_.PackageFiles).Count}).Count){continue}
         foreach ($catalogFile in $catalogPackage.Files) {
             $catalogSource = Resolve-TtsPackagePath $catalogPackage.Directory $catalogFile
             $catalogDest = Resolve-TtsPackagePath $InstallPath "tts/strategies/$($catalogPackage.Manifest.id)/$catalogFile"

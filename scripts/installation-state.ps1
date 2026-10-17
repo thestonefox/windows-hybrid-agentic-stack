@@ -5,13 +5,14 @@ function Get-StackCommandNames {
     param([switch]$Legacy)
     $names = @('agent','agentdo','localagent','localagentdo','tts-start','tts-stop','tts-status',
         'tts-say','tts-voice-list','tts-voice-add','tts-voice-remove','tts-voice-test')
-    if (-not $Legacy) { $names += @('tts-engine-list','tts-engine-install','tts-engine-uninstall','tts-engine-default','whas') }
+    if (-not $Legacy) { $names += @('tts-engine-list','tts-engine-install','tts-engine-uninstall','tts-engine-default','whas','tts-help') }
     return $names
 }
 function Test-StackCommandNames {
     param([string[]]$Names)
     return (@(Compare-Object @(Get-StackCommandNames) $Names).Count -eq 0 -or
-        @(Compare-Object @(Get-StackCommandNames | Where-Object { $_ -ne 'whas' }) $Names).Count -eq 0 -or
+        @(Compare-Object @(Get-StackCommandNames | Where-Object { $_ -ne 'tts-help' }) $Names).Count -eq 0 -or
+        @(Compare-Object @(Get-StackCommandNames | Where-Object { $_ -notin @('whas','tts-help') }) $Names).Count -eq 0 -or
         @(Compare-Object @(Get-StackCommandNames -Legacy) $Names).Count -eq 0)
 }
 

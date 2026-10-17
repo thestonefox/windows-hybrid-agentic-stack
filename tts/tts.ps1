@@ -459,6 +459,19 @@ function Get-TtsWavDurationSeconds {
     }
 }
 
+function Get-TtsServiceError {
+    param([Management.Automation.ErrorRecord]$Failure)
+    $body=[string]$Failure.ErrorDetails.Message
+    if (-not $body -and $Failure.Exception.Response) {
+        try {
+            $stream=$Failure.Exception.Response.GetResponseStream()
+            if ($stream) { $reader=New-Object IO.StreamReader($stream);try { $buffer=New-Object char[] 16384;$count=$reader.ReadBlock($buffer,0,$buffer.Length);$body=[string]::new($buffer,0,$count) } finally { $reader.Dispose() } }
+        } catch { }
+    }
+    if ($body) {try { $detail=($body|ConvertFrom-Json -ErrorAction Stop).error;if($detail -is [string] -and $detail.Length -le 1000) {return ($detail -replace '[\x00-\x1f\x7f]',' ')} } catch { } }
+    return $Failure.Exception.Message
+}
+
 function Invoke-TtsSayCore {
     param(
         [Parameter(Position = 0, Mandatory = $true)]
@@ -517,7 +530,7 @@ function Invoke-TtsSayCore {
         }
     }
     catch {
-        Write-Error "Speech failed: $($_.Exception.Message)"
+        Write-Error "Speech failed: $(Get-TtsServiceError $_)"
     }
     finally { if ($activity) { $activity.Dispose() } }
 }
@@ -529,7 +542,7 @@ function Invoke-TtsVoiceListCore {
             $response = Invoke-RestMethod -Uri "$script:TtsBaseUrl/voices" -TimeoutSec 10 -ErrorAction Stop
             foreach ($name in $response.voices) { Write-Host $name }
         }
-        catch { Write-Error "Could not list engine voices: $($_.Exception.Message)" }
+        catch { Write-Error "Could not list engine voices: $(Get-TtsServiceError $_)" }
         return
     }
     Write-Host 'default (built-in)'
@@ -606,7 +619,7 @@ function Invoke-TtsVoiceAddCore {
         Write-Host "Voice '$($result.added)' cached."
     }
     catch {
-        Write-Error "Could not create voice: $($_.Exception.Message)"
+        Write-Error "Could not save voice: $(Get-TtsServiceError $_)"
     }
 }
 
@@ -623,6 +636,7 @@ function Invoke-TtsVoiceRemoveCore {
         Write-Error 'Cannot remove the built-in default voice.'
         return
     }
+    if ($Name -ieq $script:TtsDefaultVoice) { Write-Error 'Choose another default voice for this engine before deleting this voice.'; return }
 
     if ($Name -cnotmatch '^[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}$') {
         Write-Error 'Invalid voice name.'
@@ -660,7 +674,7 @@ function Invoke-TtsVoiceRemoveCore {
         Write-Host "Voice '$($result.removed)' removed."
     }
     catch {
-        Write-Error "Could not remove voice: $($_.Exception.Message)"
+        Write-Error "Could not remove voice: $(Get-TtsServiceError $_)"
     }
 }
 
@@ -677,10 +691,10 @@ function Invoke-TtsVoiceTestCore {
 
 # Keep legacy source fixtures/layouts usable; installed multi-engine commands
 # load the ownership-checked manager through the native application host.
-$managerPath = Join-Path $script:TtsServiceDir 'engine-management.ps1'
+$managerPath = Join-Path $PSScriptRoot 'engine-management.ps1'
 if (Test-Path -LiteralPath $managerPath) {
     if (-not (Get-Command Get-StackSetupScript -ErrorAction Ignore)) {
-        . (Join-Path $script:TtsRoot 'scripts/script-invocation.ps1')
+        . (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts/script-invocation.ps1')
     }
     . (Get-StackSetupScript $managerPath)
 }

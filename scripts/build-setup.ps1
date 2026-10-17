@@ -36,8 +36,8 @@ $assets = @($properties.Values) + @('install.ps1','uninstall.ps1','config\AGENTS
     'scripts\command-host.cs','scripts\command-registration.ps1','scripts\profile-loader.ps1',
     'scripts\config.ps1','scripts\agent-commands.ps1','scripts\agent-strategies.ps1','scripts\whas.ps1','scripts\installation-state.ps1','scripts\uninstall.ps1',
     'tts\install-tts.ps1','tts\engine-management.ps1','tts\tts.ps1','tts\tts_service.py')
-$assets += 'tts/strategy.schema.json'
-$assets += @('scripts/gui-host.cs','scripts/build-gui.ps1','scripts/build-setup.ps1','scripts/setup-host.cs','scripts/setup-runtime.cs')
+$assets += @('tts/strategy.schema.json','scripts/gui-maintenance.ps1')
+$assets += @('scripts/gui-host.cs','scripts/fluent-gui.cs','scripts/gui-theme.xaml','scripts/build-gui.ps1','scripts/build-setup.ps1','scripts/setup-host.cs','scripts/setup-runtime.cs')
 . (Get-StackSetupScript (Join-Path $repo 'scripts/agent-strategies.ps1')) -InstallPath $repo
 . (Get-StackSetupScript (Join-Path $repo 'scripts/installation-state.ps1'))
 foreach ($strategy in Get-WhasAgentStrategies) {
@@ -102,10 +102,12 @@ try {
     $null = $parameters.ReferencedAssemblies.Add('System.dll')
     $null = $parameters.ReferencedAssemblies.Add('System.Core.dll')
     foreach ($assembly in @('System.Drawing.dll','System.Windows.Forms.dll','System.Web.Extensions.dll')) { $null = $parameters.ReferencedAssemblies.Add($assembly) }
+    Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase,System.Xaml
+    foreach ($assembly in @([System.Windows.Window].Assembly.Location,[System.Windows.Media.Visual].Assembly.Location,[System.Windows.Threading.Dispatcher].Assembly.Location,[System.Xaml.XamlReader].Assembly.Location)) { $null=$parameters.ReferencedAssemblies.Add($assembly) }
     $null = $parameters.ReferencedAssemblies.Add([Management.Automation.PSObject].Assembly.Location)
     $compiler = New-Object Microsoft.CSharp.CSharpCodeProvider
     $result = $compiler.CompileAssemblyFromFile($parameters, [string[]]@(
-        (Join-Path $PSScriptRoot 'command-host.cs'), (Join-Path $PSScriptRoot 'gui-host.cs'), (Join-Path $PSScriptRoot 'setup-host.cs'), (Join-Path $PSScriptRoot 'setup-runtime.cs'), $generated))
+        (Join-Path $PSScriptRoot 'command-host.cs'), (Join-Path $PSScriptRoot 'gui-host.cs'), (Join-Path $PSScriptRoot 'fluent-gui.cs'), (Join-Path $PSScriptRoot 'setup-host.cs'), (Join-Path $PSScriptRoot 'setup-runtime.cs'), $generated))
     if ($result.Errors.HasErrors) { throw (($result.Errors | ForEach-Object ToString) -join [Environment]::NewLine) }
     [IO.Directory]::CreateDirectory((Split-Path -Parent $OutputPath)) | Out-Null
     Move-Item -LiteralPath $compiled -Destination $OutputPath -Force:$Force
