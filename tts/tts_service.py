@@ -21,6 +21,7 @@ MAX_REQUEST = 128000
 
 
 def owned_path(root, relative):
+    root = Path(root).resolve()
     candidate = Path(relative)
     if candidate.is_absolute() or '..' in candidate.parts or ':' in relative:
         raise ValueError('Invalid runtime-relative path')

@@ -78,8 +78,10 @@ public static class FakeOpenCode {
     $env:Path = $fakeBin + ';' + $originalPath
     $env:WHAS_TEST_ARGUMENTS = Join-Path $testRoot 'received-arguments.txt'
     Install-StackCommandRegistration -InstallPath $rootA -RegistrationDirectory (Join-Path $localA 'WindowsHybridAgenticStack') -PersistPath $false
+    $fixtureBin = Join-Path $localA 'WindowsHybridAgenticStack\bin'
     $commands = @(Get-Command agent,agentdo,localagent,localagentdo,tts-start,tts-stop,tts-status,
-        tts-say,tts-voice-list,tts-voice-add,tts-voice-remove,tts-voice-test,tts-engine-list,tts-engine-install,tts-engine-uninstall,tts-engine-default,whas,tts-help -CommandType Application)
+        tts-say,tts-voice-list,tts-voice-add,tts-voice-remove,tts-voice-test,tts-engine-list,tts-engine-install,tts-engine-uninstall,tts-engine-default,whas,tts-help -CommandType Application |
+        Where-Object { [IO.Path]::GetDirectoryName($_.Source) -ieq $fixtureBin })
     Assert-True ($commands.Count -eq 18) 'All 18 executable names discovered'
     $beforeFiles = @(Get-ChildItem -LiteralPath (Join-Path $localA 'WindowsHybridAgenticStack') -Recurse -File |
         Select-Object FullName,LastWriteTimeUtc,Length) | ConvertTo-Json -Compress
@@ -135,11 +137,14 @@ if ((Get-ExecutionPolicy) -ne 'Restricted') { throw 'Policy changed' }
     Assert-True (($result | Out-String).Contains($rootB)) 'Changing installation root works'
     Write-Host 'PASS: Two simulated machines and installation path changes'
     $env:Path = $originalPath
-    $result = Invoke-Restricted @'
+    $env:WHAS_TEST_FIXTURE_ROOT = $testRoot
+    try { $result = Invoke-Restricted @'
 $ErrorActionPreference='Stop'
-if (@(Get-Command agent,localagent,tts-start -ErrorAction Ignore).Count -ne 0) { throw 'Unexpected commands' }
+if (@(Get-Command agent,localagent,tts-start -ErrorAction Ignore |
+    Where-Object { $_.Source.StartsWith($env:WHAS_TEST_FIXTURE_ROOT, [StringComparison]::OrdinalIgnoreCase) }).Count -ne 0) { throw 'Fixture commands leaked onto the absent PC' }
 'NO COMMANDS; NO STARTUP LOADER'
 '@
+    } finally { Remove-Item Env:\WHAS_TEST_FIXTURE_ROOT -ErrorAction SilentlyContinue }
     Assert-True (($result | Out-String).Contains('NO COMMANDS')) 'Absent PC remains clean'
     Write-Host 'PASS: Absent machine starts under Restricted without stack commands'
     $unknown = Join-Path $localA 'WindowsHybridAgenticStack\bin\notes.txt'

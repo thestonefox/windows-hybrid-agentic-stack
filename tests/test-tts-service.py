@@ -114,6 +114,11 @@ class StrategyServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             SERVICE.owned_path(self.root, '../outside')
 
+    def test_equivalent_root_path_accepted(self):
+        alias = self.root / 'tts' / '..'
+        self.assertEqual(SERVICE.owned_path(alias, 'tts/runtime.json'),
+                         (self.root / 'tts/runtime.json').resolve())
+
     def test_http_voice_capabilities_errors_and_idle_shutdown(self):
         with socket.socket() as reserved:
             reserved.bind(('127.0.0.1', 0))
