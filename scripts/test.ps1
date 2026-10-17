@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param([string]$Python = 'python', [string]$LogDirectory)
+param([string]$Python = 'python', [string]$LogDirectory, [switch]$SkipSandboxOnly)
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -ne 5 -or -not [Environment]::Is64BitProcess) { throw 'Run with 64-bit Windows PowerShell 5.1.' }
 $repo = Split-Path -Parent $PSScriptRoot
@@ -8,6 +8,18 @@ if (-not $LogDirectory) { $LogDirectory = Join-Path ([IO.Path]::GetTempPath()) (
 [IO.Directory]::CreateDirectory($LogDirectory) | Out-Null
 $tests = @(Get-ChildItem -LiteralPath (Join-Path $repo 'tests') -Filter 'test-*.ps1' -File | Sort-Object Name)
 $tests += @(Get-ChildItem -LiteralPath (Join-Path $repo 'tests') -Filter 'test-*.py' -File | Sort-Object Name)
+if ($SkipSandboxOnly) {
+    $selected = @()
+    foreach ($test in $tests) {
+        if ($test.Extension -eq '.ps1' -and
+            (Select-String -LiteralPath $test.FullName -SimpleMatch '$env:WHAS_SANDBOX_TEST' -Quiet)) {
+            Write-Host "SKIP (Windows Sandbox only): $($test.Name)"
+            continue
+        }
+        $selected += $test
+    }
+    $tests = $selected
+}
 foreach ($test in $tests) {
     Write-Host "Running $($test.Name)..."
     $start = New-Object Diagnostics.ProcessStartInfo

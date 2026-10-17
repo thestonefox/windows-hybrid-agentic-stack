@@ -30,12 +30,11 @@ zero detections and an unchanged hash. It was not executed on the host. This
 does not establish the cause of the earlier detection or guarantee safety.
 Do not disable protection, add exclusions or restore a blocked build to test it.
 
-The current GUI suites include Sandbox-only checks guarded by
-`WHAS_SANDBOX_TEST=1`. The workflow currently invokes `scripts/test.ps1`
-without that guest configuration, so it will stop at those guards. The new
-GUI suites have been run separately in a background Windows Sandbox; this
-does not mean the current GitHub workflow has passed. Integrate those suites
-into an appropriate isolated CI job before treating release automation as ready.
+Eight suites require Windows Sandbox and are guarded by
+`WHAS_SANDBOX_TEST=1`. GitHub-hosted runners do not provide that guest, so the
+workflow runs `scripts/test.ps1 -SkipSandboxOnly` and prints every skipped
+suite. Run the full suite in a disposable Windows Sandbox before publishing a
+release. A passing GitHub build does not cover those eight suites.
 
 After a successful run, open its **Actions** page and download the artifact from
 the **Artifacts** section. GitHub artifact downloads may require signing in.

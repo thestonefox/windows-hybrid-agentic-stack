@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Run isolated tests
-        run: .\scripts\test.ps1
+        run: .\scripts\test.ps1 -SkipSandboxOnly
       - name: Verify the source download executable is current
         run: .\scripts\check-bundled-gui.ps1
       - name: Build unsigned setup and checksums
