@@ -1,8 +1,9 @@
 # Builds and releases
 
 The repository contains GitHub Actions workflows for unsigned Windows x64 setup.
-They run only after the workflow files are pushed to GitHub. Adding these files
-locally does not push code, start a cloud run or publish a release.
+They run after the workflow files are pushed to GitHub. Every successful update
+to `main`, including a merged PR, automatically publishes a versioned release.
+Adding files locally does not push code, start a cloud run or publish a release.
 
 ## Continuous builds
 
@@ -13,15 +14,19 @@ cloud AI provider or play audio.
 
 The workflow definition:
 
-1. Runs isolated PowerShell and Python suites, and checks the bundled GUI's
+1. Plans the next version and grouped release notes for `main`, using complete
+   Git history and the original commits of merged PRs.
+2. Runs isolated PowerShell and Python suites, and checks the bundled GUI's
    source fingerprint and checksum without executing it.
-2. Builds the standalone EXE from a clean, committed checkout.
-3. Packages documentation, licence notices and source-commit metadata.
+3. Builds the versioned standalone EXE and ZIP from the exact workflow commit,
+   including documentation, licence notices and source-commit metadata.
 4. Creates SHA-256 checksums for the EXE and ZIP.
 5. Requires an active Defender engine, updates its signatures and scans both
    the bundled source-download EXE and the newly built release EXE.
    An unavailable scanner, detection, removal or changed hash blocks upload.
 6. Uploads the explicit release files as `whas-windows-x64`, retained for 14 days.
+7. On `main`, verifies the downloaded packages against the tested release plan,
+   tags that exact commit and publishes the release with its packages and notes.
 
 A development GUI build triggered a host Defender detection during this change.
 The revised build uses ordinary .NET resources and passed an explicit host
@@ -33,15 +38,18 @@ Do not disable protection, add exclusions or restore a blocked build to test it.
 Eight suites require Windows Sandbox and are guarded by
 `WHAS_SANDBOX_TEST=1`. GitHub-hosted runners do not provide that guest, so the
 workflow runs `scripts/test.ps1 -SkipSandboxOnly` and prints every skipped
-suite. Run the full suite in a disposable Windows Sandbox before publishing a
-release. A passing GitHub build does not cover those eight suites.
+suite. Run the full suite in a disposable Windows Sandbox before merging changes
+that require those tests. Automatic releases cover the CI selection; a passing
+GitHub build does not cover those eight Sandbox suites.
 
-After a successful run, open its **Actions** page and download the artifact from
-the **Artifacts** section. GitHub artifact downloads may require signing in.
-The versioned ZIP contains the installer, guides, interface previews and notices.
-The loose EXE is
-also included for copying to another PC. External prerequisites must still be
-installed separately.
+After a successful `main` run, download the EXE, ZIP and `SHA256SUMS.txt` from
+**Releases**. Release assets remain available after the Actions artifacts expire.
+The ZIP contains the installer, guides, interface previews and notices.
+External prerequisites must still be installed separately.
+
+PR builds and manual runs on other branches build `development` packages and
+upload Actions artifacts without publishing a tag or release. Open the run's
+**Artifacts** section to download them; GitHub may require signing in.
 
 ## Bundled executable in source downloads
 
@@ -67,21 +75,74 @@ manifest is public build metadata, containing no personal paths or settings.
 Text inputs use canonical LF endings so Git ZIPs and CRLF Windows clones have
 the same source fingerprint; the EXE checksum always covers its exact bytes.
 
-## Versioned draft releases
+## Automatic semantic releases
 
-Pushing a version tag such as `v1.0.0` runs `Draft Windows release`. It calls the
-same build/test workflow, downloads that run's assets, verifies their checksums
-and creates a **draft** GitHub Release. Nothing is published publicly until a
-maintainer reviews and publishes the draft in GitHub.
+Pushes to `main` and PRs merged into `main` use the strongest change since the
+latest published stable release. If none exists, start at `v1.0.0`.
+Otherwise:
 
-Only the draft-release job receives repository write permission. Build jobs use
-read permission, checkout does not persist credentials, and external actions
-are pinned to full commit SHAs. No signing certificate or long-lived token is
-required; the draft job uses GitHub's short-lived workflow token.
+| Commits included | Bump | Example from `v1.2.3` |
+|---|---|---|
+| Any breaking change | Major | `v2.0.0` |
+| Any `feat`, without a breaking change | Minor | `v1.3.0` |
+| Maintenance changes only | Patch | `v1.2.4` |
 
-Do not create or push a tag until the source and release are ready. Rerunning
-against an existing release fails rather than silently replacing published
-assets. Review the draft and resolve an interrupted release deliberately.
+Use scoped Conventional Commits, with every line at most 72 characters:
+
+```text
+feat(speech): add another engine
+fix(gui): align the send button
+refactor(config)!: replace the configuration format
+```
+
+The `!` immediately before `:` marks a breaking change. A `BREAKING CHANGE:`
+or `BREAKING-CHANGE:` footer also marks a major bump, regardless of commit type.
+Ordinary mentions of "breaking changes" do not mark a breaking change.
+
+`fix`, `chore`, `refactor`, `docs`, `perf`, `test`, `build`, `ci`, `style` and
+`revert` receive a patch bump unless another commit requires a larger bump.
+Unrecognized commit types and messages also receive a patch bump and appear
+under **Other Changes**. Merge wrappers are omitted when their original PR
+commits supply the changes. Original PR commits are read with paginated GitHub
+API calls, so a squash merge cannot conceal a feature or breaking change.
+Failure to read that history blocks the release instead of guessing a bump.
+
+Notes group changes in this order: **Breaking Changes**, **Features**, **Fixes**,
+**Performance**, **Refactoring**, **Documentation**, **Maintenance**, **Build**,
+**CI**, **Tests**, **Style**, **Reverts**, then **Other Changes**. Empty groups
+are omitted. Entries link to commits; later releases include a comparison link.
+
+The next version is built into the package's `build.json`. A separate publish
+job downloads those same scanned assets, verifies their checksums, version and
+commit, creates the `vX.Y.Z` Git tag and uploads the EXE, ZIP and checksums.
+The release stays a draft while assets upload and becomes public only when all
+uploads succeed. Failed tests, builds or scans create no tag or release.
+
+Main runs share a concurrency queue so version planning and publishing cannot
+race. GitHub queues up to 100 pending runs. An older run that is already covered
+by a published release skips publication rather than releasing old code as a
+new version. Release history must remain ancestral to `main`; force-pushing
+unrelated history blocks automatic versioning.
+
+Only the publish job receives repository write permission. The build reads
+contents and PR history; publishing uses GitHub's short-lived workflow token.
+Checkouts do not persist credentials, and external actions use full commit SHAs.
+Both workflows run Windows PowerShell 5.1, with Python 3.11 for the release helper.
+No personal token, signing certificate, PowerShell 7 or Node package is needed.
+
+### Retry an interrupted release
+
+Use **Actions > failed run > Re-run failed jobs** to reuse the tested packages
+and release plan. A partial draft owned by that plan resumes missing uploads;
+an already published release is left unchanged. Conflicting tags, foreign drafts
+or draft assets with different hashes stop publication for manual review.
+Do not overwrite or move a published tag to repair a failed run.
+
+Running **Windows setup build** manually on `main` can retry planning and building
+an unreleased commit. It skips publication if that commit is already released.
+Rebuilding all jobs can change unsigned EXE bytes, so use **Re-run failed jobs**
+when recovering a partial upload. Manually pushing a tag no longer starts a
+second release build; the successful `main` workflow creates its own tag.
 
 ## Build locally
 

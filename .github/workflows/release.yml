@@ -1,37 +1,40 @@
-name: Draft Windows release
+name: Publish Windows release
 
 on:
-  push:
-    tags: ['v*']
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    uses: ./.github/workflows/windows-build.yml
-    permissions:
-      contents: read
-  draft:
-    needs: build
-    runs-on: ubuntu-latest
+  publish:
+    runs-on: windows-2022
     timeout-minutes: 10
     permissions:
       actions: read
       contents: write
+    defaults:
+      run:
+        shell: powershell
     steps:
-      - name: Download tested assets and create a draft
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Download scanned packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: whas-windows-x64
+          path: dist/release-assets
+      - name: Download the tested release plan
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: whas-release-plan
+          path: dist/release-plan
+      - name: Tag the tested commit and publish its packages
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          WORKFLOW_RUN_ID: ${{ github.run_id }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo 'Invalid version tag'; exit 1; }
-          gh run download "$WORKFLOW_RUN_ID" --name whas-windows-x64 --dir release-assets
-          cd release-assets
-          sha256sum --check SHA256SUMS.txt
-          printf '%s\n' 'Unsigned Windows x64 setup. Windows may warn about an unknown publisher or block execution.' 'The ZIP includes installation guides and licence notices. Verify SHA256SUMS.txt before running setup.' > release-notes.txt
-          gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG" --notes-file release-notes.txt whas-gui.exe whas-windows-x64-*.zip SHA256SUMS.txt
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B .\scripts\release.py publish --plan .\dist\release-plan\plan.json --assets .\dist\release-assets

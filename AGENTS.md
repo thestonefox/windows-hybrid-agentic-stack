@@ -18,6 +18,8 @@ directories or the full installation guide into context for a small edit.
 - Speech: `tts/`; engine guides are under `docs/tts/`.
 - Tests: `tests/`. Run the focused test for changed behavior. Expand testing
   when changes cross components or a focused test reveals a risk.
+- Builds and releases: `.github/workflows/`, `scripts/build-release.ps1`,
+  `scripts/release.py`; release rules and retries: `docs/releases.md`.
 
 Keep private runtime data out of source. `.gitignore` lists the generated
 models, audio, logs, settings and agent data that should stay local.

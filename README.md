@@ -16,6 +16,8 @@ profile or execution-policy changes.
 Download the repository ZIP, extract it and double-click **`whas-gui.exe`**
 for guided setup. The same app provides usage, settings and removal afterward.
 For PowerShell setup, use the included `install.ps1` instead.
+Versioned EXE and ZIP downloads are available from
+[GitHub Releases](https://github.com/thestonefox/windows-hybrid-agentic-stack/releases).
 The EXE is unsigned, so Windows may display an unrecognized-app or unknown-publisher
 warning. See [EXE setup and verification](docs/installation.md#standalone-executable-setup).
 
@@ -79,6 +81,9 @@ Older launchers remain available for [compatibility](docs/cli.md#compatibility-c
 Changes are tested locally and in Windows Sandbox. Commit messages use scoped
 [Conventional Commits](https://www.conventionalcommits.org/), with every line
 limited to 72 characters.
+Successful updates to `main` automatically create a semantic version tag and a
+release with grouped commit notes, an EXE, ZIP and checksums. See the
+[release rules and retry instructions](docs/releases.md#automatic-semantic-releases).
 
 ## License
 
