@@ -58,6 +58,14 @@ try {
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $sourceRoot $relative) -Destination $destination
     }
+    # The fixture's status command must never query an installed speech service.
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    try { $testPort = $listener.LocalEndpoint.Port } finally { $listener.Stop() }
+    $defaultsPath = Join-Path $fixtureRepo 'config/defaults.json'
+    $defaults = Get-Content -LiteralPath $defaultsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $defaults.tts.port = $testPort
+    Write-Fixture $defaultsPath ($defaults | ConvertTo-Json -Depth 12)
     Write-Fixture (Join-Path $fixtureRepo 'scripts\check-prerequisites.ps1') 'exit 0'
     $configEntry = Join-Path $fixtureRepo 'scripts\config.ps1'
     $overridePath = Join-Path $testRoot 'partial-config.json'
