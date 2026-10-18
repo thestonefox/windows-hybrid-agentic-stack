@@ -52,23 +52,7 @@ jobs:
           $version = if ($env:RELEASE_VERSION) { $env:RELEASE_VERSION } else { 'development' }
           .\scripts\build-release.ps1 -Version $version
       - name: Require Defender scan before distributing the executable
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $status = Get-MpComputerStatus
-          if (-not $status.AMServiceEnabled -or -not $status.AntivirusEnabled) { throw 'Defender is unavailable; binary distribution is blocked.' }
-          Update-MpSignature
-          $platform = Get-ChildItem -LiteralPath "$env:ProgramData\Microsoft\Windows Defender\Platform" -Directory | Sort-Object Name -Descending | Select-Object -First 1
-          if (-not $platform) { throw 'Defender scanner was not found.' }
-          foreach ($relative in @('whas-gui.exe', 'dist/release/whas-gui.exe')) {
-            $exe = (Resolve-Path -LiteralPath $relative).Path
-            $before = (Get-FileHash -LiteralPath $exe).Hash
-            $began = Get-Date
-            & (Join-Path $platform.FullName 'MpCmdRun.exe') -Scan -ScanType 3 -File $exe
-            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $exe)) { throw 'Defender scan failed or removed the executable.' }
-            if ((Get-FileHash -LiteralPath $exe).Hash -cne $before) { throw 'Executable changed during scanning.' }
-            $detections = @(Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -ge $began -and ($_.Resources -join ' ').IndexOf($exe, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
-            if ($detections.Count) { throw 'Defender detected this executable; distribution is blocked.' }
-          }
+        run: .\scripts\scan-release.ps1
       - name: Upload setup assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

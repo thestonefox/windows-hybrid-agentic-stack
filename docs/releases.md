@@ -28,6 +28,15 @@ The workflow definition:
 7. On `main`, verifies the downloaded packages against the tested release plan,
    tags that exact commit and publishes the release with its packages and notes.
 
+The scan gate is `scripts/scan-release.ps1`. It updates definitions using
+Microsoft's native `MpCmdRun.exe -SignatureUpdate -MMPC`, avoiding the update
+CIM method that can fail with RPC error `0x800706be` on a hosted runner.
+Signature updates and status/detection queries retry up to three times, with
+five-second delays. A successful update is mandatory, and definition metadata
+must be present and no more than 24 hours old. Permanent update or query failures
+still block upload and release. Scans themselves are not retried to conceal an
+error, detection or changed file; the executable is never launched by the gate.
+
 A development GUI build triggered a host Defender detection during this change.
 The revised build uses ordinary .NET resources and passed an explicit host
 Defender file scan with signatures `1.461.53.0`, real-time protection enabled,
